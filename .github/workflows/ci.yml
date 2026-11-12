@@ -1,0 +1,64 @@
+# Continuous integration: on every push and pull request, GitHub starts a fresh
+# virtual machine, builds the project and runs the tests. The result shows up as
+# a green check or a red cross next to the commit / pull request.
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:  # adds a "Run workflow" button in the Actions tab
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ windows-latest, ubuntu-latest ]
+
+    env:
+      # vcpkg keeps already-compiled libraries here; the folder is saved with
+      # actions/cache so later runs do not compile libsodium and GoogleTest again.
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-binary-cache
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Restore the vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg-binary-cache
+          key: vcpkg-${{ matrix.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: vcpkg-${{ matrix.os }}-
+
+      - name: Create the cache folder
+        shell: bash
+        run: mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+
+      # Puts the MSVC compiler on PATH (Windows only).
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
+      # The GUI is skipped here: compiling Qt from source would add about an hour
+      # to every run. The core library, the CLI and their tests are built.
+      # VCPKG_INSTALLATION_ROOT points to the vcpkg copy preinstalled on GitHub's machines.
+      - name: Configure
+        shell: bash
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_GUI=OFF
+          -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure

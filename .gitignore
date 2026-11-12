@@ -5,3 +5,5 @@ graphify-out/
 CLAUDE.md
 *.pwm
 *.pwm.tmp
+build/
+vcpkg_installed/

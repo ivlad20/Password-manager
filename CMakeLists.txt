@@ -1,4 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
+
+# Must be set before project(): vcpkg reads them to decide which dependencies
+# from vcpkg.json to install (Qt is only needed for the GUI).
+option(BUILD_GUI "Build the Qt 6 graphical interface" ON)
+if (BUILD_GUI)
+    list(APPEND VCPKG_MANIFEST_FEATURES "gui")
+endif ()
+
 project(PasswordManager LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -27,7 +35,6 @@ add_executable(PasswordManager
 target_link_libraries(PasswordManager PRIVATE vault_core)
 
 # Qt 6 desktop interface
-option(BUILD_GUI "Build the Qt 6 graphical interface" ON)
 if (BUILD_GUI)
     find_package(Qt6 REQUIRED COMPONENTS Widgets Concurrent)
     qt_standard_project_setup()
@@ -60,4 +67,10 @@ if (BUILD_GUI)
                         "$<TARGET_FILE_DIR:PasswordManagerGui>/styles"
                 COMMENT "Copying Qt plugins next to PasswordManagerGui")
     endif ()
+endif ()
+
+# Automated tests (GoogleTest), run with: ctest --test-dir <build folder>
+include(CTest)
+if (BUILD_TESTING)
+    add_subdirectory(tests)
 endif ()
