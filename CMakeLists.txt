@@ -9,5 +9,10 @@ add_executable(PasswordManager
         src/main.cpp
         src/crypto/crypto.cpp
         src/core/vault.cpp
+        src/storage/vault_file.cpp
+        src/storage/serialization.cpp
+        src/crypto/password_generator.cpp
+        src/cli/console.cpp
+        src/cli/cli.cpp
 )
 target_link_libraries(PasswordManager PRIVATE unofficial-sodium::sodium)
