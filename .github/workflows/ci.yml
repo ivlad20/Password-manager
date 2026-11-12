@@ -38,6 +38,11 @@ jobs:
         shell: bash
         run: mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
 
+      # On Linux vcpkg builds libsodium with autotools, which GitHub's Ubuntu image lacks.
+      - name: Install build tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y autoconf autoconf-archive automake libtool ninja-build
+
       # Puts the MSVC compiler on PATH (Windows only).
       - name: Set up MSVC
         if: runner.os == 'Windows'
