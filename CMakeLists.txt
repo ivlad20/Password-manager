@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.21...4.4)
 
 # Must be set before project(): vcpkg reads them to decide which dependencies
 # from vcpkg.json to install (Qt is only needed for the GUI).
@@ -7,7 +7,8 @@ if (BUILD_GUI)
     list(APPEND VCPKG_MANIFEST_FEATURES "gui")
 endif ()
 
-project(PasswordManager LANGUAGES CXX)
+
+project(PasswordManager VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -48,6 +49,7 @@ if (BUILD_GUI)
             src/gui/main_window.cpp
             src/gui/entry_dialog.h
             src/gui/entry_dialog.cpp
+            resources/app.rc
     )
     target_link_libraries(PasswordManagerGui PRIVATE vault_core Qt6::Widgets Qt6::Concurrent)
 
@@ -74,3 +76,45 @@ include(CTest)
 if (BUILD_TESTING)
     add_subdirectory(tests)
 endif ()
+
+# Copy the two executables into the "bin" folder of the install location
+install(TARGETS PasswordManager
+        # Also copy the DLLs the exe loads (libsodium.dll).
+        # Windows' own DLLs are skipped: every PC already has them.
+        RUNTIME_DEPENDENCIES
+        PRE_EXCLUDE_REGEXES "api-ms-.*" "ext-ms-.*"
+        POST_EXCLUDE_REGEXES ".*[Ss]ystem32/.*"
+        DIRECTORIES "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin"
+        RUNTIME DESTINATION bin)
+
+if (BUILD_GUI)
+    install(TARGETS PasswordManagerGui
+            RUNTIME_DEPENDENCIES
+            PRE_EXCLUDE_REGEXES "api-ms-.*" "ext-ms-.*"
+            POST_EXCLUDE_REGEXES ".*[Ss]ystem32/.*"
+            DIRECTORIES "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin"
+            RUNTIME DESTINATION bin)
+
+    # Generates a script that runs windeployqt on the installed exe:
+    # it copies the Qt DLLs and plugins (platforms/, styles/, ...) next to it.
+    qt_generate_deploy_app_script(
+            TARGET PasswordManagerGui
+            OUTPUT_SCRIPT deploy_script
+            NO_UNSUPPORTED_PLATFORM_ERROR)
+    install(SCRIPT "${deploy_script}")
+endif ()
+
+# Copies the Visual C++ runtime DLLs (msvcp140.dll, vcruntime140.dll, ...)
+# so the app also starts on PCs without Visual Studio or the VC++ Redistributable.
+include(InstallRequiredSystemLibraries)
+
+# Installer settings (read by "cpack")
+set(CPACK_GENERATOR "INNOSETUP")
+set(CPACK_PACKAGE_NAME "PasswordManager")
+set(CPACK_PACKAGE_VENDOR "ivlad20")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Local encrypted password manager")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "Password Manager")   
+set(CPACK_INNOSETUP_ARCHITECTURE "x64")                    # 64-bit only, installs to Program Files (not x86)
+set(CPACK_PACKAGE_EXECUTABLES "PasswordManagerGui" "Password Manager")
+set(CPACK_CREATE_DESKTOP_LINKS "PasswordManagerGui")
+include(CPack)
