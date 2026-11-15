@@ -100,7 +100,8 @@ if (BUILD_GUI)
     qt_generate_deploy_app_script(
             TARGET PasswordManagerGui
             OUTPUT_SCRIPT deploy_script
-            NO_UNSUPPORTED_PLATFORM_ERROR)
+            NO_UNSUPPORTED_PLATFORM_ERROR
+            NO_TRANSLATIONS)
     install(SCRIPT "${deploy_script}")
 endif ()
 
@@ -117,4 +118,6 @@ set(CPACK_PACKAGE_INSTALL_DIRECTORY "Password Manager")
 set(CPACK_INNOSETUP_ARCHITECTURE "x64")                    # 64-bit only, installs to Program Files (not x86)
 set(CPACK_PACKAGE_EXECUTABLES "PasswordManagerGui" "Password Manager")
 set(CPACK_CREATE_DESKTOP_LINKS "PasswordManagerGui")
+set(CPACK_INNOSETUP_ICON_FILE "${CMAKE_SOURCE_DIR}/resources/app.ico")
+set(CPACK_INNOSETUP_SETUP_UninstallDisplayIcon "{app}\\\\bin\\\\PasswordManagerGui.exe")
 include(CPack)
