@@ -6,6 +6,22 @@ A local, offline password manager written in C++17. All entries are kept in a si
 encrypted file, protected by one master password. It has two interfaces that share the
 same core: an interactive command line (CLI) and a Qt 6 desktop application (GUI).
 
+![Main window](docs/ss_4_pm.png)
+
+| Unlocking the vault | Adding an entry | Entry with a generated password |
+|---|---|---|
+| ![Unlock dialog](docs/ss_1_pm.png) | ![Add entry dialog over the main window](docs/ss_2_pm.png) | ![Filled add entry dialog](docs/ss_3_pm.png) |
+
+## Download
+
+A Windows installer is available on the
+[Releases](https://github.com/ivlad20/Password-manager/releases) page. It adds a Start menu
+shortcut (and optionally a desktop shortcut) and can be removed from *Settings → Apps*.
+Uninstalling keeps your vault in `%APPDATA%\PasswordManager`.
+
+The installer is not digitally signed, so Windows may show "Windows protected your PC".
+Click *More info → Run anyway* to continue.
+
 ## Features
 
 - Master password turned into an encryption key with **Argon2id** (memory-hard, slows down brute force)
@@ -16,6 +32,7 @@ same core: an interactive command line (CLI) and a Qt 6 desktop application (GUI
   so a crash never leaves a half-written vault
 - Random password generator based on libsodium's cryptographically secure RNG
 - GUI: search, copy to clipboard (cleared automatically after 30 seconds), show/hide password
+- Windows installer built with CPack and Inno Setup
 
 ## Architecture
 
@@ -43,6 +60,8 @@ CLI and the GUI are two thin front ends over the same `vault_core` library.
 | `src/cli/` | Interactive command loop, hidden password input in the terminal |
 | `src/gui/` | Qt 6 windows: unlock dialog, main window, add/edit dialog |
 | `tests/` | GoogleTest unit tests for the core and the GUI |
+| `resources/` | Application icon |
+| `docs/` | Screenshots used in this README |
 
 ### Vault file format
 
@@ -65,7 +84,7 @@ again from the master password. The key itself is never written to disk.
 
 Requirements:
 - A C++17 compiler (MSVC on Windows, GCC or Clang on Linux)
-- CMake 3.20 or newer
+- CMake 3.21 or newer
 - [vcpkg](https://github.com/microsoft/vcpkg)
 
 The dependencies (libsodium, GoogleTest and Qt 6) are listed in `vcpkg.json`.
@@ -95,6 +114,30 @@ ctest --test-dir build --output-on-failure
 
 The GUI tests open the real windows on Qt's `offscreen` platform, so nothing
 appears on screen.
+
+## Making a release
+
+The installer is built from a Release build. It needs
+[Inno Setup](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`),
+with its folder on `PATH`.
+
+1. Update `VERSION` in `project()` in `CMakeLists.txt` (for example `0.2.0`).
+2. Build the project with `CMAKE_BUILD_TYPE=Release`.
+3. Create the installer from the build folder:
+   ```bash
+   cd build
+   cpack
+   ```
+   This produces `PasswordManager-<version>-win64.exe`. CPack only packages what is
+   already built, so always build first.
+4. Test it: install, start it from the Start menu, uninstall.
+5. Merge the changes into `master`, then tag that commit and push the tag:
+   ```bash
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+6. On GitHub: *Releases → Draft a new release*, choose the tag, describe the changes
+   and attach the installer.
 
 ## Usage
 
