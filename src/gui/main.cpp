@@ -1,6 +1,7 @@
 #include "main_window.h"
 #include "message_dialog.h"
 #include "theme.h"
+#include "window_activation.h"
 
 #include <sodium.h>
 #include <QApplication>
@@ -35,6 +36,6 @@ int main(int argc, char* argv[]) {
     if (!window.unlock()) {
         return 0;
     }
-    window.show();
+    bring_to_front(&window);
     return QApplication::exec();
 }

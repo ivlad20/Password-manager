@@ -57,6 +57,23 @@ inline QAction* action(QWidget* widget, const QString& text) {
     return nullptr;
 }
 
+// Like on_next_dialog, but without blocking the caller: polls until a modal dialog of
+// the given class is shown. Needed when the dialog opens by itself (auto-lock) or from
+// inside another dialog.
+inline void when_dialog_shown(const char* class_name, std::function<void(QWidget*)> handle) {
+    auto* timer = new QTimer;
+    timer->setInterval(20);
+    QObject::connect(timer, &QTimer::timeout, [timer, class_name, handle] {
+        QWidget* modal = QApplication::activeModalWidget();
+        if (modal != nullptr && modal->inherits(class_name) && modal->isVisible()) {
+            timer->stop();
+            timer->deleteLater();
+            handle(modal);
+        }
+    });
+    timer->start();
+}
+
 // Modal dialogs block in exec(), so the test schedules what to do in the dialog
 // before triggering the action that opens it.
 inline void on_next_dialog(std::function<void(QWidget*)> handle) {

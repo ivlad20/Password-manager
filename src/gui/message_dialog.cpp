@@ -6,7 +6,8 @@
 #include <QVBoxLayout>
 
 MessageDialog::MessageDialog(Kind kind, const QString& title, const QString& text,
-                             const QString& accept_text, QWidget* parent)
+                             const QString& accept_text, QWidget* parent,
+                             const QString& cancel_text)
     : QDialog(parent) {
     setWindowTitle(title);
     setMinimumWidth(400);
@@ -34,7 +35,7 @@ MessageDialog::MessageDialog(Kind kind, const QString& title, const QString& tex
     connect(accept_button, &QPushButton::clicked, this, &QDialog::accept);
 
     if (kind != Kind::Error) {
-        auto* cancel_button = new QPushButton(tr("Cancel"), this);
+        auto* cancel_button = new QPushButton(cancel_text.isEmpty() ? tr("Cancel") : cancel_text, this);
         connect(cancel_button, &QPushButton::clicked, this, &QDialog::reject);
         buttons->addWidget(cancel_button);
         // For destructive actions Enter must not delete by accident.
@@ -50,6 +51,17 @@ bool MessageDialog::confirm_dangerous(QWidget* parent, const QString& title, con
                                       const QString& accept_text) {
     MessageDialog dialog(Kind::ConfirmDangerous, title, text, accept_text, parent);
     return dialog.exec() == QDialog::Accepted;
+}
+
+bool MessageDialog::confirm(QWidget* parent, const QString& title, const QString& text,
+                            const QString& accept_text, const QString& cancel_text) {
+    MessageDialog dialog(Kind::Confirm, title, text, accept_text, parent, cancel_text);
+    return dialog.exec() == QDialog::Accepted;
+}
+
+void MessageDialog::information(QWidget* parent, const QString& title, const QString& text) {
+    MessageDialog dialog(Kind::Error, title, text, tr("OK"), parent);
+    dialog.exec();
 }
 
 void MessageDialog::error(QWidget* parent, const QString& title, const QString& text) {

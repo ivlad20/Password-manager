@@ -1,5 +1,6 @@
 #include "cli.h"
 #include "console.h"
+#include "../core/vault_transfer.h"
 #include "../crypto/password_generator.h"
 
 #include <sodium.h>
@@ -194,6 +195,10 @@ bool Cli::handle_command(const std::string& command, const std::string& argument
         return cmd_lock();
     } else if (command == "passwd") {
         cmd_change_master_password();
+    } else if (command == "export") {
+        cmd_export(argument);
+    } else if (command == "import") {
+        cmd_import(argument);
     } else if (command == "quit" || command == "exit") {
         return false;
     } else {
@@ -212,6 +217,9 @@ void Cli::cmd_help() const {
               << "  gen [length]      generate a random password (default "
               << DEFAULT_PASSWORD_LENGTH << ")\n"
               << "  passwd            change the master password\n"
+              << "  export [folder]   save a copy of the vault to move it to another computer\n"
+              << "                    (default: the current folder)\n"
+              << "  import <file>     replace this vault with another one (a backup is kept)\n"
               << "  lock              lock the vault and ask for the master password again\n"
               << "  quit              lock the vault and exit\n";
 }
@@ -406,6 +414,78 @@ void Cli::cmd_change_master_password() {
     }
     wipe(current);
     wipe(replacement);
+}
+
+void Cli::cmd_export(const std::string& folder) const {
+    try {
+        const std::string copy = export_vault(path, folder.empty() ? std::string(".") : folder);
+        std::cout << "Vault copied to " << copy << ".\n"
+                  << "On the other computer, run: import <that file>. It opens with the same master password.\n";
+    } catch (const std::exception& error) {
+        std::cout << "Cannot export the vault: " << error.what() << "\n";
+    }
+}
+
+void Cli::cmd_import(const std::string& file) {
+    if (file.empty()) {
+        std::cout << "Usage: import <file>\n";
+        return;
+    }
+    if (same_file(file, path)) {
+        std::cout << "That is the vault that is already open.\n";
+        return;
+    }
+
+    std::optional<Vault> imported;
+    try {
+        imported = Vault::load(file);
+    } catch (const std::exception& error) {
+        std::cout << "Cannot import: " << error.what() << "\n";
+        return;
+    }
+
+    // Check the imported vault's password before changing anything.
+    std::string password;
+    bool unlocked = false;
+    for (int attempt = 1; attempt <= MAX_UNLOCK_ATTEMPTS && !unlocked; ++attempt) {
+        if (!read_hidden("Master password of the imported vault: ", password)) {
+            return;
+        }
+        try {
+            unlocked = imported->unlock(password);
+        } catch (const std::exception& error) {
+            wipe(password);
+            std::cout << "Cannot import: " << error.what() << "\n";
+            return;
+        }
+        wipe(password);
+        if (!unlocked) {
+            std::cout << "Wrong password.\n";
+        }
+    }
+    if (!unlocked) {
+        std::cout << "Nothing was imported.\n";
+        return;
+    }
+
+    std::string answer;
+    if (!read_line("Replace your current vault with it? A backup is kept. [y/N]: ", answer) ||
+        (answer != "y" && answer != "Y" && answer != "yes")) {
+        std::cout << "Nothing was imported.\n";
+        return;
+    }
+
+    try {
+        const std::string backup = backup_vault(path);
+        imported->save_to(path);
+        std::cout << "Vault imported (" << imported->get_entries().size() << " entries).\n"
+                  << "Your previous vault was saved as " << backup << ".\n"
+                  << "From now on, use the master password of the imported vault.\n";
+    } catch (const std::exception& error) {
+        std::cout << "Cannot import: " << error.what() << "\nYour current vault was not changed.\n";
+        return;
+    }
+    vault = std::move(imported);
 }
 
 bool Cli::cmd_lock() {

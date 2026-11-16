@@ -26,6 +26,10 @@ public:
     // The values typed by the user; only meaningful after the dialog was accepted.
     [[nodiscard]] VaultEntry entry() const;
 
+public slots:
+    // Asks before throwing away typed changes (Cancel, Esc or closing the window).
+    void reject() override;
+
 private slots:
     void generate_password();
     void toggle_password_visibility(bool visible);
@@ -46,4 +50,8 @@ private:
     QLineEdit* url_edit = nullptr;
     QPlainTextEdit* notes_edit = nullptr;
     QLabel* error_label = nullptr;
+
+    // Field values when the dialog opened, to notice unsaved changes.
+    [[nodiscard]] QStringList field_values() const;
+    QStringList initial_values;
 };

@@ -1,11 +1,15 @@
 #include "gui/main_window.h"
 #include "gui/lock_settings.h"
+#include "crypto/password_strength.h"
+#include "gui/strength_bar.h"
+#include "gui/vault_import.h"
 #include "core/vault.h"
 #include "gui_test_helpers.h"
 #include "../test_helpers.h"
 
 #include <QCheckBox>
 #include <QClipboard>
+#include <QDir>
 #include <QComboBox>
 #include <QFile>
 #include <QKeyEvent>
@@ -25,23 +29,6 @@ QStringList visible_names(QListWidget* list) {
         if (!list->item(i)->isHidden()) names << list->item(i)->text();
     }
     return names;
-}
-
-// Like on_next_dialog, but without blocking the caller: polls until a modal dialog of
-// the given class is shown. Needed when the dialog opens by itself (auto-lock) or from
-// inside another dialog.
-void when_dialog_shown(const char* class_name, std::function<void(QWidget*)> handle) {
-    auto* timer = new QTimer;
-    timer->setInterval(20);
-    QObject::connect(timer, &QTimer::timeout, [timer, class_name, handle] {
-        QWidget* modal = QApplication::activeModalWidget();
-        if (modal != nullptr && modal->inherits(class_name) && modal->isVisible()) {
-            timer->stop();
-            timer->deleteLater();
-            handle(modal);
-        }
-    });
-    timer->start();
 }
 
 void select(QListWidget* list, const QString& name) {
@@ -83,6 +70,7 @@ protected:
 
     void TearDown() override {
         window.reset();
+        set_vault_file_chooser(nullptr);
         QFile::remove(LockSettings::file_path());
         TempDirTest::TearDown();
     }
@@ -211,6 +199,7 @@ TEST_F(MainWindowTest, AddRefusesDuplicateName) {
         edits[2]->setText("x");
         QMetaObject::invokeMethod(dialog, "validate_and_accept");
         error = visible_text(dialog);
+        when_dialog_shown("MessageDialog", [](QWidget* box) { button(box, "Discard")->click(); });
         QMetaObject::invokeMethod(dialog, "reject");
     });
     action(window.get(), "Add")->trigger();
@@ -385,4 +374,137 @@ TEST_F(MainWindowTest, ChangeMasterPasswordValidatesInput) {
     EXPECT_TRUE(errors[1].contains("do not match")) << errors[1].toStdString();
     EXPECT_TRUE(errors[2].contains("same as the current")) << errors[2].toStdString();
     EXPECT_TRUE(reload().is_unlocked());  // the old password still opens the vault
+}
+
+TEST_F(MainWindowTest, EntryDialogShowsPasswordStrength) {
+    int typed_score = -1, generated_score = -1;
+    bool hidden_when_empty = false;
+    on_next_dialog([&](QWidget* dialog) {
+        auto* strength = dialog->findChild<StrengthBar*>();
+        hidden_when_empty = !strength->isVisible();
+        line_edits(dialog)[2]->setText("password");
+        typed_score = strength->isVisible() ? strength->score() : -1;
+        button(dialog, "Generate")->click();
+        generated_score = strength->score();
+        when_dialog_shown("MessageDialog", [](QWidget* box) { button(box, "Discard")->click(); });
+        QMetaObject::invokeMethod(dialog, "reject");
+    });
+    action(window.get(), "Add")->trigger();
+
+    EXPECT_TRUE(hidden_when_empty);
+    EXPECT_EQ(typed_score, 0);
+    EXPECT_EQ(generated_score, MAX_PASSWORD_STRENGTH);
+}
+
+TEST_F(MainWindowTest, CancelAsksBeforeDiscardingChanges) {
+    // Without changes, Cancel closes right away (a question here would block the test).
+    on_next_dialog([](QWidget* dialog) { QMetaObject::invokeMethod(dialog, "reject"); });
+    action(window.get(), "Add")->trigger();
+
+    select(list, "Gmail");
+    bool open_after_keep_editing = false;
+    bool closed_after_discard = false;
+    on_next_dialog([&](QWidget* dialog) {
+        line_edits(dialog)[1]->setText("someone-else@example.com");
+
+        when_dialog_shown("MessageDialog", [](QWidget* box) { button(box, "Cancel")->click(); });
+        QMetaObject::invokeMethod(dialog, "reject");
+        open_after_keep_editing = dialog->isVisible();
+
+        when_dialog_shown("MessageDialog", [](QWidget* box) { button(box, "Discard")->click(); });
+        QMetaObject::invokeMethod(dialog, "reject");
+        closed_after_discard = !dialog->isVisible();
+    });
+    action(window.get(), "Edit")->trigger();
+
+    EXPECT_TRUE(open_after_keep_editing);
+    EXPECT_TRUE(closed_after_discard);
+    EXPECT_EQ(reload().find_entry("Gmail")->username, "me@example.com");
+}
+
+TEST_F(MainWindowTest, ExportCopiesVaultToFolder) {
+    const QString folder = QString::fromStdString(path("exports"));
+    window->set_export_folder(folder);
+    QString message;
+    when_dialog_shown("SettingsDialog", [&](QWidget* settings) {
+        when_dialog_shown("MessageDialog", [&](QWidget* box) {
+            message = visible_text(box);
+            button(box, "Close")->click();
+        });
+        button(settings, "Export a Copy...")->click();
+        button(settings, "Cancel")->click();
+    });
+    action(window.get(), "Settings")->trigger();
+
+    const QStringList files = QDir(folder).entryList({"*.pwm"}, QDir::Files);
+    ASSERT_EQ(files.size(), 1);
+    EXPECT_TRUE(files[0].startsWith("PasswordManager-vault-")) << files[0].toStdString();
+    EXPECT_TRUE(message.contains(files[0])) << message.toStdString();
+    EXPECT_EQ(read_file(QDir(folder).filePath(files[0]).toStdString()), read_file(file));
+}
+
+TEST_F(MainWindowTest, ImportReplacesVaultAndKeepsBackup) {
+    const std::string other = path("other computer.pwm");
+    {
+        Vault vault = Vault::create(other, "other computer pw");
+        vault.add_entry({"Steam", "gamer", "st3am-Pass", "", ""});
+        vault.save();
+    }
+    set_vault_file_chooser([&](QWidget*) { return QString::fromStdString(other); });
+
+    QString import_title;
+    QString info;
+    when_dialog_shown("SettingsDialog", [&](QWidget* settings) {
+        when_dialog_shown("UnlockDialog", [&](QWidget* dialog) {
+            import_title = visible_text(dialog);
+            when_dialog_shown("MessageDialog", [&](QWidget* confirm) {
+                when_dialog_shown("MessageDialog", [&](QWidget* box) {
+                    info = visible_text(box);
+                    button(box, "OK")->click();
+                });
+                button(confirm, "Replace")->click();
+            });
+            line_edits(dialog)[0]->setText("other computer pw");
+            QMetaObject::invokeMethod(dialog, "submit");
+        });
+        button(settings, "Import a Vault...")->click();
+        button(settings, "Cancel")->click();
+    });
+    action(window.get(), "Settings")->trigger();
+
+    EXPECT_TRUE(import_title.contains("Import a vault")) << import_title.toStdString();
+    EXPECT_TRUE(info.contains("vault-backup-")) << info.toStdString();
+    EXPECT_EQ(visible_names(list), QStringList{"Steam"});
+
+    // The app's vault now opens with the imported password; the backup with the old one.
+    Vault saved = Vault::load(file);
+    ASSERT_TRUE(saved.unlock("other computer pw"));
+    EXPECT_NE(saved.find_entry("Steam"), nullptr);
+
+    const QStringList backups = QDir(QString::fromStdString(dir.string())).entryList({"vault-backup-*.pwm"});
+    ASSERT_EQ(backups.size(), 1);
+    Vault backup = Vault::load((dir / backups[0].toStdString()).string());
+    ASSERT_TRUE(backup.unlock(MASTER));
+    EXPECT_EQ(backup.get_entries().size(), 3u);
+}
+
+TEST_F(MainWindowTest, ImportRefusesFileThatIsNotAVault) {
+    const std::string junk = path("notes.pwm");
+    write_file(junk, "not a vault");
+    set_vault_file_chooser([&](QWidget*) { return QString::fromStdString(junk); });
+
+    QString error;
+    when_dialog_shown("SettingsDialog", [&](QWidget* settings) {
+        when_dialog_shown("MessageDialog", [&](QWidget* box) {
+            error = visible_text(box);
+            button(box, "OK")->click();
+        });
+        button(settings, "Import a Vault...")->click();
+        button(settings, "Cancel")->click();
+    });
+    action(window.get(), "Settings")->trigger();
+
+    EXPECT_TRUE(error.contains("not a Password Manager vault")) << error.toStdString();
+    EXPECT_EQ(list->count(), 3);
+    EXPECT_EQ(reload().get_entries().size(), 3u);
 }

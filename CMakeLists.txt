@@ -20,7 +20,9 @@ find_package(unofficial-sodium CONFIG REQUIRED)
 add_library(vault_core STATIC
         src/crypto/crypto.cpp
         src/crypto/password_generator.cpp
+        src/crypto/password_strength.cpp
         src/core/vault.cpp
+        src/core/vault_transfer.cpp
         src/storage/vault_file.cpp
         src/storage/serialization.cpp
 )
@@ -57,6 +59,12 @@ if (BUILD_GUI)
             src/gui/change_password_dialog.cpp
             src/gui/lock_settings.h
             src/gui/lock_settings.cpp
+            src/gui/strength_bar.h
+            src/gui/strength_bar.cpp
+            src/gui/vault_import.h
+            src/gui/vault_import.cpp
+            src/gui/window_activation.h
+            src/gui/window_activation.cpp
             src/gui/theme.h
             src/gui/theme.cpp
             resources/app.rc

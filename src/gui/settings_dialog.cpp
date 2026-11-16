@@ -20,12 +20,10 @@ static QString auto_lock_text(int minutes) {
     return QObject::tr("After %1 minutes").arg(minutes);
 }
 
-SettingsDialog::SettingsDialog(const LockSettings& current,
-                               std::function<bool(QWidget*)> change_password,
-                               QWidget* parent)
-    : QDialog(parent), change_master_password(std::move(change_password)) {
+SettingsDialog::SettingsDialog(const LockSettings& current, SettingsActions dialog_actions, QWidget* parent)
+    : QDialog(parent), actions(std::move(dialog_actions)) {
     setWindowTitle(tr("Settings"));
-    setFixedWidth(460);
+    setFixedWidth(480);
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(24, 20, 24, 20);
@@ -40,6 +38,19 @@ SettingsDialog::SettingsDialog(const LockSettings& current,
         auto* label = new QLabel(text, this);
         label->setObjectName(QStringLiteral("field_label"));
         layout->addWidget(label);
+    };
+    auto add_buttons = [&](const QStringList& texts) {
+        QList<QPushButton*> created;
+        auto* row = new QHBoxLayout;
+        for (const QString& text : texts) {
+            auto* button = new QPushButton(text, this);
+            button->setAutoDefault(false);
+            row->addWidget(button);
+            created << button;
+        }
+        row->addStretch();
+        layout->addLayout(row);
+        return created;
     };
 
     // ---- Automatic lock ----
@@ -69,17 +80,25 @@ SettingsDialog::SettingsDialog(const LockSettings& current,
 
     // ---- Master password ----
     add_section(tr("MASTER PASSWORD"));
-    auto* password_row = new QHBoxLayout;
-    auto* change_button = new QPushButton(tr("Change Master Password..."), this);
-    change_button->setAutoDefault(false);
-    password_row->addWidget(change_button);
-    password_row->addStretch();
-    layout->addLayout(password_row);
+    QPushButton* change_button = add_buttons({tr("Change Master Password...")}).first();
+    layout->addSpacing(10);
 
-    password_status = new QLabel(this);
-    password_status->setObjectName(QStringLiteral("muted"));
-    password_status->hide();
-    layout->addWidget(password_status);
+    // ---- Moving the vault ----
+    add_section(tr("MOVE TO ANOTHER COMPUTER"));
+    auto* transfer_text = new QLabel(tr("Export saves an encrypted copy of the vault in your Downloads folder. "
+                                        "On the other computer, import that copy; it opens with the same "
+                                        "master password."),
+                                     this);
+    transfer_text->setObjectName(QStringLiteral("muted"));
+    transfer_text->setWordWrap(true);
+    layout->addWidget(transfer_text);
+    const QList<QPushButton*> transfer_buttons = add_buttons({tr("Export a Copy..."), tr("Import a Vault...")});
+
+    status_label = new QLabel(this);
+    status_label->setObjectName(QStringLiteral("muted"));
+    status_label->setWordWrap(true);
+    status_label->hide();
+    layout->addWidget(status_label);
     layout->addSpacing(12);
 
     // ---- Buttons ----
@@ -94,7 +113,21 @@ SettingsDialog::SettingsDialog(const LockSettings& current,
     buttons->addWidget(save_button);
     layout->addLayout(buttons);
 
-    connect(change_button, &QPushButton::clicked, this, &SettingsDialog::on_change_master_password);
+    connect(change_button, &QPushButton::clicked, this, [this] {
+        if (actions.change_master_password && actions.change_master_password(this)) {
+            show_status(tr("The master password was changed."));
+        }
+    });
+    connect(transfer_buttons[0], &QPushButton::clicked, this, [this] {
+        if (actions.export_vault) {
+            actions.export_vault(this);
+        }
+    });
+    connect(transfer_buttons[1], &QPushButton::clicked, this, [this] {
+        if (actions.import_vault && actions.import_vault(this)) {
+            show_status(tr("The vault was imported."));
+        }
+    });
     connect(cancel_button, &QPushButton::clicked, this, &SettingsDialog::reject);
     connect(save_button, &QPushButton::clicked, this, &SettingsDialog::accept);
 }
@@ -107,9 +140,7 @@ LockSettings SettingsDialog::settings() const {
     return result;
 }
 
-void SettingsDialog::on_change_master_password() {
-    if (change_master_password && change_master_password(this)) {
-        password_status->setText(tr("The master password was changed."));
-        password_status->show();
-    }
+void SettingsDialog::show_status(const QString& message) {
+    status_label->setText(message);
+    status_label->show();
 }
