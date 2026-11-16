@@ -70,7 +70,7 @@ All integers are little-endian.
 | Field | Size (bytes) | Description |
 |---|---|---|
 | magic | 4 | `PWMV` |
-| version | 4 | format version, currently `1` |
+| version | 4 | format version, currently `2` |
 | opslimit | 8 | Argon2id iterations |
 | memlimit | 8 | Argon2id memory |
 | salt | 16 | random, generated when the vault is created |
@@ -79,6 +79,22 @@ All integers are little-endian.
 
 Only the ciphertext is secret. The header holds everything needed to derive the key
 again from the master password. The key itself is never written to disk.
+
+Decrypted, the ciphertext holds the entry count (u32) and then, for each entry, its
+size (u32) followed by tagged fields: `field id u16 | field size u32 | bytes`.
+
+| Id | Field | Value |
+|---|---|---|
+| 1–5 | name, username, password, url, notes | UTF-8 text |
+| 6, 7 | created, last modified | u64, Unix time in seconds (0 = unknown) |
+| 8 | favorite | u8, 0 or 1 |
+| 9 | tag | UTF-8 text, once per tag |
+| 10 | old password | u64 time of the change + the password, newest first, at most 5 |
+
+Unknown field ids are skipped, so newer versions of the app can add fields without
+breaking older files. Vaults in format `1` (app versions 0.1.0 and 0.2.0, five
+length-prefixed strings per entry) still open and are converted to format `2` on the
+next save. Converted entries show their dates as unknown.
 
 ## Building
 

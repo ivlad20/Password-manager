@@ -34,6 +34,10 @@ private slots:
 private:
     std::function<bool(const std::string&)> name_taken;
     std::string original_name;
+    // Fields the dialog does not edit (yet), kept so saving does not drop them.
+    // Timestamps and password history are managed by Vault::update_entry.
+    bool original_favorite = false;
+    std::vector<std::string> original_tags;
 
     QLineEdit* name_edit = nullptr;
     QLineEdit* username_edit = nullptr;

@@ -64,6 +64,7 @@ private:
     QToolButton* show_password_button = nullptr;
     QLabel* url_value = nullptr;
     QPlainTextEdit* notes_value = nullptr;
+    QLabel* dates_value = nullptr;
 
     QAction* edit_action = nullptr;
     QAction* delete_action = nullptr;

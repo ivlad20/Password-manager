@@ -7,6 +7,7 @@
 #include "../storage/serialization.h"
 
 #include <algorithm>
+#include <ctime>
 #include <filesystem>
 #include <stdexcept>
 #include <utility>
@@ -31,6 +32,24 @@ static void wipe(VaultEntry& entry) {
     wipe(entry.password);
     wipe(entry.url);
     wipe(entry.notes);
+    for (std::string& tag : entry.tags) {
+        wipe(tag);
+    }
+    entry.tags.clear();
+    for (PasswordHistoryItem& item : entry.password_history) {
+        wipe(item.password);
+    }
+    entry.password_history.clear();
+}
+
+static uint64_t now() {
+    return static_cast<uint64_t>(std::time(nullptr));
+}
+
+// True if the user-visible content differs (timestamps and history are ignored).
+static bool content_differs(const VaultEntry& a, const VaultEntry& b) {
+    return a.name != b.name || a.username != b.username || a.password != b.password ||
+           a.url != b.url || a.notes != b.notes || a.favorite != b.favorite || a.tags != b.tags;
 }
 
 static void wipe(std::vector<VaultEntry>& entries) {
@@ -109,7 +128,8 @@ bool Vault::unlock(const std::string& master_password) {
     // The password was right, so a parse error here means the vault is corrupted
     // and is reported as an exception, not as a wrong password.
     try {
-        entries = deserialize_entries(payload);
+        entries = file.version == VAULT_FORMAT_VERSION_1 ? deserialize_entries_v1(payload)
+                                                         : deserialize_entries(payload);
     } catch (...) {
         wipe(payload);
         wipe(derived);
@@ -138,6 +158,7 @@ void Vault::save() {
     wipe(payload);
 
     VaultFile updated = file;
+    updated.version = VAULT_FORMAT_VERSION;  // an old vault is upgraded on its first save
     updated.nonce = std::move(nonce);
     updated.ciphertext = std::move(ciphertext);
     write_vault_file(path, updated);
@@ -154,7 +175,11 @@ void Vault::add_entry(const VaultEntry& entry) {
     if (find_entry(entry.name) != nullptr) {
         throw std::runtime_error("an entry named '" + entry.name + "' already exists");
     }
-    entries.push_back(entry);
+    VaultEntry added = entry;
+    added.created_at = now();
+    added.modified_at = added.created_at;
+    added.password_history.clear();  // a new entry has no previous passwords
+    entries.push_back(std::move(added));
 }
 
 void Vault::update_entry(const std::string& name, const VaultEntry& updated) {
@@ -171,6 +196,22 @@ void Vault::update_entry(const std::string& name, const VaultEntry& updated) {
         throw std::runtime_error("an entry named '" + updated.name + "' already exists");
     }
     VaultEntry copy = updated;  // copy first in case `updated` refers to *it
+
+    // These are managed here, not by the caller.
+    copy.created_at = it->created_at;
+    copy.modified_at = content_differs(*it, copy) ? now() : it->modified_at;
+    copy.password_history = it->password_history;
+
+    // Remember the replaced password, newest first.
+    if (copy.password != it->password && !it->password.empty()) {
+        copy.password_history.insert(copy.password_history.begin(),
+                                     PasswordHistoryItem{it->password, copy.modified_at});
+        while (copy.password_history.size() > MAX_PASSWORD_HISTORY) {
+            wipe(copy.password_history.back().password);
+            copy.password_history.pop_back();
+        }
+    }
+
     wipe(*it);
     *it = std::move(copy);
 }

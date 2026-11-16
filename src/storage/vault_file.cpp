@@ -7,12 +7,19 @@
 #include <stdexcept>
 
 static const uint8_t MAGIC[4] = {'P', 'W', 'M', 'V'};
-static const uint32_t FORMAT_VERSION = 1;
+
+static bool is_supported_version(uint32_t version) {
+    return version == VAULT_FORMAT_VERSION_1 || version == VAULT_FORMAT_VERSION;
+}
 
 void write_vault_file(const std::string& path, const VaultFile& file) {
+    if (!is_supported_version(file.version)) {
+        throw std::runtime_error("unsupported vault format version " + std::to_string(file.version));
+    }
+
     std::vector<uint8_t> out;
     append_bytes(out, MAGIC, sizeof(MAGIC));
-    append_u32(out, FORMAT_VERSION);
+    append_u32(out, file.version);
     append_u64(out, file.opslimit);
     append_u64(out, file.memlimit);
     append_bytes(out, file.salt.data(), file.salt.size());
@@ -51,12 +58,13 @@ VaultFile read_vault_file(const std::string& path) {
         throw std::runtime_error(path + " is not a vault file");
     }
 
-    uint32_t version = reader.read_u32();
-    if (version != FORMAT_VERSION) {
-        throw std::runtime_error("unsupported vault format version " + std::to_string(version));
+    VaultFile file;
+    file.version = reader.read_u32();
+    if (!is_supported_version(file.version)) {
+        throw std::runtime_error("unsupported vault format version " + std::to_string(file.version) +
+                                 " (made by a newer version of the app?)");
     }
 
-    VaultFile file;
     file.opslimit = reader.read_u64();
     file.memlimit = reader.read_u64();
 

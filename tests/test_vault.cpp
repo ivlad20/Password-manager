@@ -1,8 +1,11 @@
 #include "core/vault.h"
 #include "test_helpers.h"
 
+#include <ctime>
 #include <filesystem>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -160,4 +163,107 @@ TEST_F(VaultTest, MoveTransfersUnlockedState) {
     EXPECT_TRUE(b.is_unlocked());
     EXPECT_FALSE(a.is_unlocked());  // NOLINT(bugprone-use-after-move): checking the moved-from state
     EXPECT_NE(b.find_entry("Gmail"), nullptr);
+}
+
+TEST_F(VaultTest, AddAndUpdateManageTimestamps) {
+    Vault vault = Vault::create(path("vault.pwm"), MASTER);
+    const auto before = static_cast<uint64_t>(std::time(nullptr));
+    VaultEntry entry = gmail();
+    entry.created_at = 42;  // set by the vault, not by the caller
+    vault.add_entry(entry);
+    const auto after = static_cast<uint64_t>(std::time(nullptr));
+
+    const VaultEntry* added = vault.find_entry("Gmail");
+    ASSERT_NE(added, nullptr);
+    EXPECT_GE(added->created_at, before);
+    EXPECT_LE(added->created_at, after);
+    EXPECT_EQ(added->modified_at, added->created_at);
+    const uint64_t created = added->created_at;
+
+    // Saving without changes keeps the modification time.
+    VaultEntry unchanged = *added;
+    unchanged.modified_at = 1;
+    vault.update_entry("Gmail", unchanged);
+    EXPECT_EQ(vault.find_entry("Gmail")->modified_at, created);
+
+    VaultEntry edited = gmail();
+    edited.created_at = 7;
+    edited.favorite = true;
+    edited.tags = {"email"};
+    vault.update_entry("Gmail", edited);
+    const VaultEntry* updated = vault.find_entry("Gmail");
+    EXPECT_EQ(updated->created_at, created);
+    EXPECT_GE(updated->modified_at, created);
+    EXPECT_TRUE(updated->favorite);
+    EXPECT_EQ(updated->tags, std::vector<std::string>{"email"});
+    EXPECT_TRUE(updated->password_history.empty());  // the password did not change
+}
+
+TEST_F(VaultTest, PasswordChangesAreKeptInHistory) {
+    Vault vault = Vault::create(path("vault.pwm"), MASTER);
+    vault.add_entry(gmail());
+
+    VaultEntry entry = gmail();
+    for (int i = 1; i <= 7; ++i) {
+        entry.password = "password-" + std::to_string(i);
+        entry.password_history.clear();  // the caller cannot rewrite the history
+        vault.update_entry("Gmail", entry);
+    }
+
+    const auto& history = vault.find_entry("Gmail")->password_history;
+    ASSERT_EQ(history.size(), MAX_PASSWORD_HISTORY);
+    // Newest first: the password before "password-7" was "password-6", and so on.
+    for (size_t i = 0; i < history.size(); ++i) {
+        EXPECT_EQ(history[i].password, "password-" + std::to_string(6 - i)) << "item " << i;
+        EXPECT_GT(history[i].changed_at, 0u);
+    }
+
+    // The history survives a save and reload.
+    vault.save();
+    Vault reloaded = Vault::load(path("vault.pwm"));
+    ASSERT_TRUE(reloaded.unlock(MASTER));
+    const VaultEntry* loaded = reloaded.find_entry("Gmail");
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->password, "password-7");
+    ASSERT_EQ(loaded->password_history.size(), MAX_PASSWORD_HISTORY);
+    EXPECT_EQ(loaded->password_history[0].password, "password-6");
+}
+
+// tests/data/vault_v1.pwm was written by version 0.2.0 of the app (format version 1).
+TEST_F(VaultTest, OpensVersion1VaultAndUpgradesItOnSave) {
+    const std::string file = path("old.pwm");
+    std::filesystem::copy_file(std::string(TEST_DATA_DIR) + "/vault_v1.pwm", file);
+    EXPECT_EQ(read_file(file)[4], '\x01');
+
+    const auto check_entries = [](const Vault& vault) {
+        ASSERT_EQ(vault.get_entries().size(), 3u);
+        const VaultEntry* gmail_entry = vault.find_entry("Gmail");
+        ASSERT_NE(gmail_entry, nullptr);
+        EXPECT_EQ(gmail_entry->username, "me@example.com");
+        EXPECT_EQ(gmail_entry->password, "SuperSecret123!");
+        EXPECT_EQ(gmail_entry->url, "https://mail.google.com");
+        EXPECT_EQ(gmail_entry->notes, "personal\nsecond line");
+        EXPECT_EQ(gmail_entry->created_at, 0u);  // unknown for migrated entries
+        EXPECT_FALSE(gmail_entry->favorite);
+
+        const VaultEntry* bank_entry = vault.find_entry("bank");
+        ASSERT_NE(bank_entry, nullptr);
+        EXPECT_EQ(bank_entry->password, "B4nk!pass");
+
+        const VaultEntry* cafe = vault.find_entry("Caf\xC3\xA9 \xC8\x98tefan");
+        ASSERT_NE(cafe, nullptr);
+        EXPECT_EQ(cafe->password, std::string("a\0b", 3));
+    };
+
+    Vault vault = Vault::load(file);
+    EXPECT_FALSE(vault.unlock("wrong password"));
+    ASSERT_TRUE(vault.unlock("fixture-password-v1"));
+    check_entries(vault);
+
+    vault.save();
+    EXPECT_EQ(read_file(file)[4], '\x02');
+
+    Vault reloaded = Vault::load(file);
+    ASSERT_TRUE(reloaded.unlock("fixture-password-v1"));
+    check_entries(reloaded);
 }

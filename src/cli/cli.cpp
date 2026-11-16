@@ -4,14 +4,34 @@
 
 #include <sodium.h>
 #include <algorithm>
+#include <ctime>
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
 static const int MAX_UNLOCK_ATTEMPTS = 3;
 static const size_t MIN_MASTER_PASSWORD_LENGTH = 8;
+
+// Local date and time, or "unknown" for entries migrated from format version 1.
+static std::string format_timestamp(uint64_t seconds) {
+    if (seconds == 0) {
+        return "unknown";
+    }
+    const auto time = static_cast<std::time_t>(seconds);
+    std::tm local{};
+#ifdef _WIN32
+    localtime_s(&local, &time);
+#else
+    localtime_r(&time, &local);
+#endif
+    std::ostringstream out;
+    out << std::put_time(&local, "%Y-%m-%d %H:%M");
+    return out.str();
+}
 
 static void wipe(std::string& value) {
     if (!value.empty()) {
@@ -226,7 +246,9 @@ void Cli::cmd_get(const std::string& name) const {
               << "  Username: " << entry->username << "\n"
               << "  Password: " << entry->password << "\n"
               << "  URL:      " << entry->url << "\n"
-              << "  Notes:    " << entry->notes << "\n";
+              << "  Notes:    " << entry->notes << "\n"
+              << "  Created:  " << format_timestamp(entry->created_at) << "\n"
+              << "  Modified: " << format_timestamp(entry->modified_at) << "\n";
 }
 
 void Cli::cmd_add() {
