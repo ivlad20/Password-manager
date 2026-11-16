@@ -1,10 +1,11 @@
 #include "unlock_dialog.h"
 
 #include <sodium.h>
-#include <QDialogButtonBox>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
-#include <QFormLayout>
+#include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
 #include <QProgressBar>
@@ -14,36 +15,80 @@
 
 static const int MIN_MASTER_PASSWORD_LENGTH = 8;
 
+static const QString REPOSITORY_URL = QStringLiteral("https://github.com/ivlad20/Password-manager");
+
+// First name of the signed-in Windows / Linux user, for the greeting.
+static QString user_name() {
+    QString name = qEnvironmentVariable("USERNAME");
+    if (name.isEmpty()) {
+        name = qEnvironmentVariable("USER");
+    }
+    return name;
+}
+
 UnlockDialog::UnlockDialog(QString path, QWidget* parent)
     : QDialog(parent), vault_path(std::move(path)), create_mode(!QFileInfo::exists(vault_path)) {
     setWindowTitle(create_mode ? tr("Create a new vault") : tr("Unlock vault"));
-    setMinimumWidth(420);
+    setFixedWidth(600);
 
     auto* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(40, 32, 40, 16);
+    layout->setSpacing(10);
+
+    // Greeting and explanation
+    const QString name = user_name();
+    auto* greeting = new QLabel(this);
+    greeting->setObjectName(QStringLiteral("title"));
+    greeting->setAlignment(Qt::AlignCenter);
+    if (create_mode) {
+        greeting->setText(tr("Welcome!"));
+    } else {
+        greeting->setText(name.isEmpty() ? tr("Hi!") : tr("Hi %1!").arg(name));
+    }
+    layout->addWidget(greeting);
 
     auto* intro = new QLabel(this);
     intro->setWordWrap(true);
-    if (create_mode) {
-        intro->setText(tr("No vault was found. Choose a master password for a new vault.\n"
-                          "It cannot be recovered if you forget it."));
-    } else {
-        intro->setText(tr("Enter the master password for:\n%1").arg(QDir::toNativeSeparators(vault_path)));
-    }
+    intro->setAlignment(Qt::AlignCenter);
+    intro->setText(create_mode
+                           ? tr("Choose a master password for your new vault.\n"
+                                "It cannot be recovered if you forget it.")
+                           : tr("Enter the master password for:"));
     layout->addWidget(intro);
 
-    auto* form = new QFormLayout;
+    auto* path_label = new QLabel(QDir::toNativeSeparators(vault_path), this);
+    path_label->setObjectName(QStringLiteral("muted"));
+    path_label->setAlignment(Qt::AlignCenter);
+    path_label->setWordWrap(true);
+    path_label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    layout->addWidget(path_label);
+    layout->addSpacing(12);
+
+    // Password fields, centered and narrower than the window
+    auto add_centered = [&](QWidget* widget, int width) {
+        widget->setFixedWidth(width);
+        auto* row = new QHBoxLayout;
+        row->addStretch();
+        row->addWidget(widget);
+        row->addStretch();
+        layout->addLayout(row);
+    };
+
     password_edit = new QLineEdit(this);
     password_edit->setEchoMode(QLineEdit::Password);
-    form->addRow(tr("Master password:"), password_edit);
+    password_edit->setPlaceholderText(create_mode ? tr("New master password") : tr("Master password"));
+    add_centered(password_edit, 340);
+
     if (create_mode) {
         confirm_edit = new QLineEdit(this);
         confirm_edit->setEchoMode(QLineEdit::Password);
-        form->addRow(tr("Repeat password:"), confirm_edit);
+        confirm_edit->setPlaceholderText(tr("Repeat the master password"));
+        add_centered(confirm_edit, 340);
     }
-    layout->addLayout(form);
 
     status_label = new QLabel(this);
     status_label->setWordWrap(true);
+    status_label->setAlignment(Qt::AlignCenter);
     status_label->hide();
     layout->addWidget(status_label);
 
@@ -52,15 +97,34 @@ UnlockDialog::UnlockDialog(QString path, QWidget* parent)
     progress->setRange(0, 0);
     progress->setTextVisible(false);
     progress->hide();
-    layout->addWidget(progress);
+    add_centered(progress, 340);
 
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    submit_button = buttons->button(QDialogButtonBox::Ok);
-    submit_button->setText(create_mode ? tr("Create") : tr("Unlock"));
-    layout->addWidget(buttons);
+    layout->addSpacing(8);
+    submit_button = new QPushButton(create_mode ? tr("Create Vault") : tr("Open Vault"), this);
+    submit_button->setObjectName(QStringLiteral("primary"));
+    submit_button->setDefault(true);  // Enter in a password field presses it
+    add_centered(submit_button, 160);
+    layout->addSpacing(12);
 
-    connect(buttons, &QDialogButtonBox::accepted, this, &UnlockDialog::submit);
-    connect(buttons, &QDialogButtonBox::rejected, this, &UnlockDialog::reject);
+    // Footer: link to the source code
+    auto* footer = new QHBoxLayout;
+    footer->setSpacing(6);
+    if (QFile::exists(QStringLiteral(":/icons/github.png"))) {
+        auto* icon = new QLabel(this);
+        icon->setPixmap(QIcon(QStringLiteral(":/icons/github.png")).pixmap(16, 16));
+        footer->addWidget(icon);
+    }
+    auto* link = new QLabel(this);
+    link->setObjectName(QStringLiteral("muted"));
+    link->setTextFormat(Qt::RichText);
+    link->setOpenExternalLinks(true);
+    link->setText(QStringLiteral("<a href=\"%1\">%2</a>")
+                          .arg(REPOSITORY_URL, tr("Source code on GitHub")));
+    footer->addWidget(link);
+    footer->addStretch();
+    layout->addLayout(footer);
+
+    connect(submit_button, &QPushButton::clicked, this, &UnlockDialog::submit);
     connect(&watcher, &QFutureWatcher<OpenResult>::finished, this, &UnlockDialog::on_finished);
 
     password_edit->setFocus();
@@ -150,14 +214,14 @@ void UnlockDialog::set_busy(bool value, const QString& message) {
     submit_button->setEnabled(!value);
     progress->setVisible(value);
     if (value) {
-        status_label->setStyleSheet({});
+        status_label->setStyleSheet(QStringLiteral("color: #6B7078;"));
         status_label->setText(message);
         status_label->show();
     }
 }
 
 void UnlockDialog::show_error(const QString& message) {
-    status_label->setStyleSheet(QStringLiteral("color: #c0392b;"));
+    status_label->setStyleSheet(QStringLiteral("color: #C93C34;"));
     status_label->setText(message);
     status_label->show();
 }

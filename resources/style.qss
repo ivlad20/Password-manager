@@ -1,0 +1,241 @@
+/*
+ * Application style sheet (Qt's CSS dialect).
+ *
+ * Palette:
+ *   window      #FFFFFF   dialogs and main window background
+ *   panel       #E4E5E1   light gray containers inside the window
+ *   field       #F4F5F2   input fields on white backgrounds
+ *   border      #D2D4CE
+ *   text        #1F2328
+ *   muted       #6B7078   secondary text, labels
+ *   accent      #93D473   main buttons, selection, focus
+ *   accent-dark #7BC157   hover / pressed
+ *   danger      #E5534B   destructive buttons, errors
+ *
+ * Widgets pick special styles through their objectName, e.g. setObjectName("primary").
+ */
+
+/* ---------- Base ---------- */
+
+QWidget {
+    color: #1F2328;
+    font-family: "Segoe UI";
+    font-size: 10pt;
+}
+
+QMainWindow, QDialog, QWidget#central {
+    background: #FFFFFF;
+}
+
+QFrame#panel {
+    background: #E4E5E1;
+    border-radius: 15px;
+}
+
+QLabel {
+    background: transparent;
+}
+
+QLabel#title {
+    font-size: 15pt;
+    font-weight: 600;
+}
+
+QLabel#muted, QLabel#field_label {
+    color: #6B7078;
+}
+
+QLabel#field_label {
+    font-size: 9pt;
+    font-weight: 600;
+    margin-top: 4px;
+}
+
+QLabel#error {
+    color: #C93C34;
+}
+
+QLabel#placeholder {
+    color: #6B7078;
+    font-size: 11pt;
+}
+
+/* ---------- Inputs ---------- */
+
+QLineEdit, QPlainTextEdit, QSpinBox {
+    background: #F4F5F2;
+    border: 1px solid #D2D4CE;
+    border-radius: 10px;
+    padding: 7px 10px;
+    selection-background-color: #93D473;
+    selection-color: #1F2328;
+}
+
+QLineEdit:focus, QPlainTextEdit:focus, QSpinBox:focus {
+    border: 2px solid #93D473;
+    padding: 6px 9px;
+}
+
+QLineEdit:disabled {
+    color: #9A9DA3;
+}
+
+/* Inputs placed on a gray panel are white so they stand out. */
+QFrame#panel QLineEdit, QFrame#panel QPlainTextEdit {
+    background: #FFFFFF;
+    border-color: #FFFFFF;
+}
+
+QFrame#panel QLineEdit:focus {
+    border-color: #93D473;
+}
+
+/* Read-only values in the details panel look like flat white boxes. */
+QLineEdit#value, QLabel#value, QPlainTextEdit#value {
+    background: #FFFFFF;
+    border: none;
+    border-radius: 10px;
+    padding: 7px 10px;
+}
+
+QLineEdit#entry_title, QFrame#panel QLineEdit#entry_title {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font-size: 15pt;
+    font-weight: 600;
+}
+
+/* ---------- Buttons ---------- */
+
+QPushButton, QToolButton {
+    background: #E4E5E1;
+    border: none;
+    border-radius: 10px;
+    padding: 8px 16px;
+    font-weight: 600;
+}
+
+QPushButton:hover, QToolButton:hover {
+    background: #D6D8D2;
+}
+
+QPushButton:pressed, QToolButton:pressed, QToolButton:checked {
+    background: #C9CCC4;
+}
+
+/* Secondary buttons on a gray panel are white. */
+QFrame#panel QPushButton, QFrame#panel QToolButton {
+    background: #FFFFFF;
+}
+
+QFrame#panel QPushButton:hover, QFrame#panel QToolButton:hover {
+    background: #F0F1EE;
+}
+
+QPushButton#primary, QToolButton#primary,
+QFrame#panel QPushButton#primary, QFrame#panel QToolButton#primary {
+    background: #93D473;
+    color: #16290B;
+}
+
+QPushButton#primary:hover, QToolButton#primary:hover {
+    background: #86CB63;
+}
+
+QPushButton#primary:pressed, QToolButton#primary:pressed {
+    background: #7BC157;
+}
+
+QPushButton#danger, QToolButton#danger,
+QFrame#panel QPushButton#danger, QFrame#panel QToolButton#danger {
+    background: #E5534B;
+    color: #FFFFFF;
+}
+
+QPushButton#danger:hover, QToolButton#danger:hover {
+    background: #D9443C;
+}
+
+QPushButton:disabled, QToolButton:disabled,
+QFrame#panel QPushButton:disabled, QFrame#panel QToolButton:disabled {
+    background: #EEEFEC;
+    color: #A3A6AC;
+}
+
+QPushButton:focus, QToolButton:focus {
+    outline: none;
+}
+
+/* Small "Copy" / "Show" buttons next to values. */
+QToolButton#small {
+    padding: 6px 12px;
+    font-weight: 500;
+}
+
+/* ---------- List of entries ---------- */
+
+QListWidget {
+    background: transparent;
+    border: none;
+    outline: none;
+}
+
+QListWidget::item {
+    padding: 9px 10px;
+    margin: 1px 0;
+    border-radius: 10px;
+}
+
+QListWidget::item:hover {
+    background: #D6D8D2;
+}
+
+QListWidget::item:selected {
+    background: #93D473;
+    color: #16290B;
+}
+
+/* ---------- Misc ---------- */
+
+QProgressBar {
+    background: #E4E5E1;
+    border: none;
+    border-radius: 3px;
+    max-height: 6px;
+}
+
+QProgressBar::chunk {
+    background: #93D473;
+    border-radius: 3px;
+}
+
+QStatusBar {
+    background: #FFFFFF;
+    color: #6B7078;
+}
+
+QToolTip {
+    background: #1F2328;
+    color: #FFFFFF;
+    border: none;
+    padding: 4px 8px;
+}
+
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 2px;
+}
+
+QScrollBar::handle:vertical {
+    background: #C3C6BF;
+    border-radius: 3px;
+    min-height: 24px;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
+    height: 0;
+}

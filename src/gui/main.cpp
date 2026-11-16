@@ -1,9 +1,10 @@
 #include "main_window.h"
+#include "message_dialog.h"
+#include "theme.h"
 
 #include <sodium.h>
 #include <QApplication>
 #include <QDir>
-#include <QMessageBox>
 #include <QStandardPaths>
 
 // Usage: PasswordManagerGui [vault file]
@@ -12,10 +13,11 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("PasswordManager"));
     QApplication::setApplicationDisplayName(QStringLiteral("Password Manager"));
+    theme::apply(app);
 
     if (sodium_init() < 0) {
-        QMessageBox::critical(nullptr, QStringLiteral("Password Manager"),
-                              QStringLiteral("Failed to initialize libsodium."));
+        MessageDialog::error(nullptr, QStringLiteral("Password Manager"),
+                             QStringLiteral("Failed to initialize libsodium."));
         return 1;
     }
 

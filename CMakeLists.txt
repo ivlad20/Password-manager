@@ -49,25 +49,33 @@ if (BUILD_GUI)
             src/gui/main_window.cpp
             src/gui/entry_dialog.h
             src/gui/entry_dialog.cpp
+            src/gui/message_dialog.h
+            src/gui/message_dialog.cpp
+            src/gui/theme.h
+            src/gui/theme.cpp
             resources/app.rc
     )
     target_link_libraries(PasswordManagerGui PRIVATE vault_core Qt6::Widgets Qt6::Concurrent)
 
-    # Qt loads these at runtime from folders next to the .exe, so copy them after each build.
-    #   platforms/qwindows       - required, without it the app cannot open a window
-    #   styles/qmodernwindowsstyle - native Windows 10/11 look instead of the generic Fusion style
+    # Files embedded in the exe and read at runtime through ":/<name>" paths.
+    qt_add_resources(PasswordManagerGui "ui_resources"
+            PREFIX "/"
+            BASE resources
+            FILES
+                resources/style.qss
+                resources/icons/github.png)
+
+    # Qt loads its platform plugin at runtime from a folder next to the .exe, so copy it
+    # after each build. Without platforms/qwindows the app cannot open a window.
+    # (The look comes from the built-in Fusion style plus resources/style.qss.)
     if (WIN32)
         add_custom_command(TARGET PasswordManagerGui POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E make_directory
                         "$<TARGET_FILE_DIR:PasswordManagerGui>/platforms"
-                        "$<TARGET_FILE_DIR:PasswordManagerGui>/styles"
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
                         "$<TARGET_FILE:Qt6::QWindowsIntegrationPlugin>"
                         "$<TARGET_FILE_DIR:PasswordManagerGui>/platforms"
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        "$<TARGET_FILE:Qt6::QModernWindowsStylePlugin>"
-                        "$<TARGET_FILE_DIR:PasswordManagerGui>/styles"
-                COMMENT "Copying Qt plugins next to PasswordManagerGui")
+                COMMENT "Copying the Qt platform plugin next to PasswordManagerGui")
     endif ()
 endif ()
 

@@ -1,25 +1,22 @@
 #include "main_window.h"
 #include "entry_dialog.h"
+#include "message_dialog.h"
 #include "unlock_dialog.h"
 
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
-#include <QFormLayout>
+#include <QFrame>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
-#include <QMessageBox>
 #include <QMimeData>
 #include <QPlainTextEdit>
-#include <QSplitter>
 #include <QStackedLayout>
 #include <QStatusBar>
-#include <QStyle>
-#include <QToolBar>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -31,7 +28,8 @@ static const int CLIPBOARD_CLEAR_SECONDS = 30;
 MainWindow::MainWindow(QString path, QWidget* parent)
     : QMainWindow(parent), vault_path(std::move(path)) {
     setWindowTitle(tr("Password Manager"));
-    resize(900, 560);
+    resize(980, 620);
+    setMinimumSize(820, 520);
     build_ui();
 
     clipboard_timer.setSingleShot(true);
@@ -42,32 +40,48 @@ MainWindow::~MainWindow() {
     clear_clipboard();
 }
 
-void MainWindow::build_ui() {
-    // Toolbar and keyboard shortcuts
-    auto* toolbar = addToolBar(tr("Main"));
-    toolbar->setMovable(false);
-    toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+// A light gray rounded container (styled through "QFrame#panel" in style.qss).
+static QFrame* make_panel(QWidget* parent) {
+    auto* panel = new QFrame(parent);
+    panel->setObjectName(QStringLiteral("panel"));
+    return panel;
+}
 
-    auto* add_action = toolbar->addAction(style()->standardIcon(QStyle::SP_FileIcon), tr("Add"));
+static QLabel* make_field_label(const QString& text, QWidget* parent) {
+    auto* label = new QLabel(text, parent);
+    label->setObjectName(QStringLiteral("field_label"));
+    return label;
+}
+
+static QToolButton* make_small_button(const QString& text, QWidget* parent) {
+    auto* button = new QToolButton(parent);
+    button->setObjectName(QStringLiteral("small"));
+    button->setText(text);
+    button->setCursor(Qt::PointingHandCursor);
+    return button;
+}
+
+void MainWindow::build_ui() {
+    // Actions with keyboard shortcuts. They are shown as buttons in the right panel.
+    auto* add_action = new QAction(tr("Add"), this);
     add_action->setShortcut(QKeySequence::New);
-    edit_action = toolbar->addAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView), tr("Edit"));
+    edit_action = new QAction(tr("Edit"), this);
     edit_action->setShortcut(QKeySequence(Qt::Key_F2));
-    delete_action = toolbar->addAction(style()->standardIcon(QStyle::SP_TrashIcon), tr("Delete"));
+    delete_action = new QAction(tr("Delete"), this);
     delete_action->setShortcut(QKeySequence::Delete);
-    toolbar->addSeparator();
-    copy_username_action = toolbar->addAction(tr("Copy username"));
+    copy_username_action = new QAction(tr("Copy username"), this);
     copy_username_action->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_B));
-    copy_password_action = toolbar->addAction(tr("Copy password"));
+    copy_password_action = new QAction(tr("Copy password"), this);
     copy_password_action->setShortcut(QKeySequence::Copy);
-    toolbar->addSeparator();
-    auto* lock_action = toolbar->addAction(style()->standardIcon(QStyle::SP_BrowserStop), tr("Lock"));
+    auto* lock_action = new QAction(tr("Lock"), this);
     lock_action->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_L));
 
-    for (QAction* action : toolbar->actions()) {
-        if (!action->shortcut().isEmpty()) {
-            action->setToolTip(QStringLiteral("%1 (%2)").arg(action->text(),
-                                                             action->shortcut().toString(QKeySequence::NativeText)));
-        }
+    const QList<QAction*> actions = {add_action, edit_action, delete_action,
+                                     copy_username_action, copy_password_action, lock_action};
+    for (QAction* action : actions) {
+        action->setToolTip(QStringLiteral("%1 (%2)").arg(action->text(),
+                                                         action->shortcut().toString(QKeySequence::NativeText)));
+        addAction(action);  // shortcuts work anywhere in the window
     }
 
     connect(add_action, &QAction::triggered, this, &MainWindow::add_entry);
@@ -77,10 +91,17 @@ void MainWindow::build_ui() {
     connect(copy_password_action, &QAction::triggered, this, &MainWindow::copy_password);
     connect(lock_action, &QAction::triggered, this, &MainWindow::lock);
 
-    // Left side: search box and list of entries
-    auto* left = new QWidget(this);
+    auto* central = new QWidget(this);
+    central->setObjectName(QStringLiteral("central"));
+    auto* columns = new QHBoxLayout(central);
+    columns->setContentsMargins(16, 16, 16, 8);
+    columns->setSpacing(16);
+
+    // ---- Left panel: search box and list of entries ----
+    auto* left = make_panel(central);
     auto* left_layout = new QVBoxLayout(left);
-    left_layout->setContentsMargins(0, 0, 0, 0);
+    left_layout->setContentsMargins(12, 12, 12, 12);
+    left_layout->setSpacing(10);
 
     search_edit = new QLineEdit(left);
     search_edit->setPlaceholderText(tr("Search (Ctrl+F)"));
@@ -96,72 +117,76 @@ void MainWindow::build_ui() {
     });
 
     list = new QListWidget(left);
+    list->setCursor(Qt::PointingHandCursor);
     left_layout->addWidget(list);
 
     connect(search_edit, &QLineEdit::textChanged, this, &MainWindow::apply_filter);
     connect(list, &QListWidget::currentItemChanged, this, &MainWindow::on_selection_changed);
     connect(list, &QListWidget::itemDoubleClicked, this, &MainWindow::copy_password);
 
-    // Right side: details of the selected entry (or a hint when nothing is selected)
-    auto* right = new QWidget(this);
-    auto* stack = new QStackedLayout(right);
+    // ---- Middle panel: details of the selected entry (or a hint when nothing is selected) ----
+    auto* middle = make_panel(central);
+    auto* stack = new QStackedLayout(middle);
 
-    placeholder = new QLabel(tr("Select an entry, or press Add to create one."), right);
+    placeholder = new QLabel(tr("Select an entry, or press Add to create one."), middle);
+    placeholder->setObjectName(QStringLiteral("placeholder"));
     placeholder->setAlignment(Qt::AlignCenter);
-    placeholder->setStyleSheet(QStringLiteral("color: gray;"));
+    placeholder->setWordWrap(true);
     stack->addWidget(placeholder);
 
-    details = new QWidget(right);
-    auto* form = new QFormLayout(details);
+    details = new QWidget(middle);
+    auto* form = new QVBoxLayout(details);
+    form->setContentsMargins(20, 18, 20, 20);
+    form->setSpacing(6);
 
-    auto make_readonly = [](QWidget* owner) {
+    auto make_value = [](QWidget* owner) {
         auto* edit = new QLineEdit(owner);
+        edit->setObjectName(QStringLiteral("value"));
         edit->setReadOnly(true);
-        edit->setFrame(false);
         return edit;
     };
 
-    name_value = make_readonly(details);
-    QFont title_font = name_value->font();
-    title_font.setPointSizeF(title_font.pointSizeF() * 1.4);
-    title_font.setBold(true);
-    name_value->setFont(title_font);
-    form->addRow(name_value);
+    name_value = new QLineEdit(details);
+    name_value->setObjectName(QStringLiteral("entry_title"));
+    name_value->setReadOnly(true);
+    form->addWidget(name_value);
+    form->addSpacing(6);
 
-    username_value = make_readonly(details);
-    auto* copy_user_button = new QToolButton(details);
-    copy_user_button->setText(tr("Copy"));
-    auto* user_row = new QHBoxLayout;
-    user_row->addWidget(username_value, 1);
-    user_row->addWidget(copy_user_button);
-    form->addRow(tr("Username:"), user_row);
+    // Each field: a small label above, then the value with its buttons on one row.
+    auto add_row = [&](const QString& label, QWidget* value, std::initializer_list<QWidget*> buttons) {
+        form->addWidget(make_field_label(label, details));
+        auto* row = new QHBoxLayout;
+        row->setSpacing(6);
+        row->addWidget(value, 1);
+        for (QWidget* button : buttons) {
+            row->addWidget(button);
+        }
+        form->addLayout(row);
+    };
 
-    password_value = make_readonly(details);
+    username_value = make_value(details);
+    auto* copy_user_button = make_small_button(tr("Copy"), details);
+    add_row(tr("USERNAME"), username_value, {copy_user_button});
+
+    password_value = make_value(details);
     password_value->setEchoMode(QLineEdit::Password);
-    show_password_button = new QToolButton(details);
-    show_password_button->setText(tr("Show"));
+    show_password_button = make_small_button(tr("Show"), details);
     show_password_button->setCheckable(true);
-    auto* copy_pass_button = new QToolButton(details);
-    copy_pass_button->setText(tr("Copy"));
-    auto* pass_row = new QHBoxLayout;
-    pass_row->addWidget(password_value, 1);
-    pass_row->addWidget(show_password_button);
-    pass_row->addWidget(copy_pass_button);
-    form->addRow(tr("Password:"), pass_row);
+    auto* copy_pass_button = make_small_button(tr("Copy"), details);
+    add_row(tr("PASSWORD"), password_value, {show_password_button, copy_pass_button});
 
     url_value = new QLabel(details);
+    url_value->setObjectName(QStringLiteral("value"));
     url_value->setOpenExternalLinks(true);
     url_value->setTextInteractionFlags(Qt::TextBrowserInteraction);
-    auto* copy_url_button = new QToolButton(details);
-    copy_url_button->setText(tr("Copy"));
-    auto* url_row = new QHBoxLayout;
-    url_row->addWidget(url_value, 1);
-    url_row->addWidget(copy_url_button);
-    form->addRow(tr("URL:"), url_row);
+    auto* copy_url_button = make_small_button(tr("Copy"), details);
+    add_row(tr("WEBSITE"), url_value, {copy_url_button});
 
+    form->addWidget(make_field_label(tr("NOTES"), details));
     notes_value = new QPlainTextEdit(details);
+    notes_value->setObjectName(QStringLiteral("value"));
     notes_value->setReadOnly(true);
-    form->addRow(tr("Notes:"), notes_value);
+    form->addWidget(notes_value, 1);
 
     stack->addWidget(details);
 
@@ -173,15 +198,39 @@ void MainWindow::build_ui() {
         show_password_button->setText(visible ? tr("Hide") : tr("Show"));
     });
 
-    auto* splitter = new QSplitter(this);
-    splitter->addWidget(left);
-    splitter->addWidget(right);
-    splitter->setStretchFactor(0, 1);
-    splitter->setStretchFactor(1, 2);
-    splitter->setSizes({280, 620});
-    setCentralWidget(splitter);
+    // ---- Right panel: action buttons ----
+    auto* right = make_panel(central);
+    right->setFixedWidth(200);
+    auto* right_layout = new QVBoxLayout(right);
+    right_layout->setContentsMargins(20, 20, 20, 20);
+    right_layout->setSpacing(12);
 
-    statusBar();
+    auto add_action_button = [&](QAction* action, const QString& style) {
+        auto* button = new QToolButton(right);
+        button->setDefaultAction(action);  // text, tooltip and enabled state follow the action
+        button->setObjectName(style);
+        button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        button->setMinimumHeight(40);
+        button->setCursor(Qt::PointingHandCursor);
+        right_layout->addWidget(button);
+    };
+
+    right_layout->addStretch();
+    add_action_button(add_action, QStringLiteral("primary"));
+    add_action_button(edit_action, QStringLiteral("primary"));
+    add_action_button(copy_username_action, QStringLiteral("primary"));
+    add_action_button(copy_password_action, QStringLiteral("primary"));
+    add_action_button(delete_action, QStringLiteral("danger"));
+    right_layout->addStretch();
+    add_action_button(lock_action, QStringLiteral("secondary"));
+
+    columns->addWidget(left, 3);
+    columns->addWidget(middle, 4);
+    columns->addWidget(right);
+    setCentralWidget(central);
+
+    statusBar()->setSizeGripEnabled(false);
     show_entry(nullptr);
 }
 
@@ -302,8 +351,8 @@ bool MainWindow::save() {
         vault->save();
         return true;
     } catch (const std::exception& error) {
-        QMessageBox::critical(this, tr("Save failed"),
-                              tr("The change could not be written to disk:\n%1").arg(QString::fromStdString(error.what())));
+        MessageDialog::error(this, tr("Save failed"),
+                             tr("The change could not be written to disk:\n%1").arg(QString::fromStdString(error.what())));
         return false;
     }
 }
@@ -347,10 +396,9 @@ void MainWindow::delete_entry() {
         return;
     }
     const QString name = QString::fromStdString(entry->name);
-    const auto answer = QMessageBox::question(this, tr("Delete entry"),
-                                              tr("Delete \"%1\"? This cannot be undone.").arg(name),
-                                              QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-    if (answer != QMessageBox::Yes) {
+    if (!MessageDialog::confirm_dangerous(this, tr("Delete entry"),
+                                          tr("Delete \"%1\"? This cannot be undone.").arg(name),
+                                          tr("Delete"))) {
         return;
     }
     vault->remove_entry(entry->name);

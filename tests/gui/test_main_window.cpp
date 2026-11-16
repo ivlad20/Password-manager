@@ -198,11 +198,11 @@ TEST_F(MainWindowTest, EditCanRenameEntry) {
 TEST_F(MainWindowTest, DeleteAsksForConfirmation) {
     select(list, "GitHub");
 
-    on_next_dialog([](QWidget* box) { button(box, "No")->click(); });
+    on_next_dialog([](QWidget* box) { button(box, "Cancel")->click(); });
     action(window.get(), "Delete")->trigger();
     EXPECT_EQ(list->count(), 3);
 
-    on_next_dialog([](QWidget* box) { button(box, "Yes")->click(); });
+    on_next_dialog([](QWidget* box) { button(box, "Delete")->click(); });
     action(window.get(), "Delete")->trigger();
     EXPECT_EQ(visible_names(list), (QStringList{"bank", "Gmail"}));
     EXPECT_EQ(reload().find_entry("GitHub"), nullptr);
