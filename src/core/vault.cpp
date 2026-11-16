@@ -154,6 +154,18 @@ void Vault::save() {
     file = write_entries(file, key);
 }
 
+void Vault::save_to(const std::string& new_path) {
+    require_unlocked();
+    std::string old_path = std::move(path);
+    path = new_path;
+    try {
+        save();
+    } catch (...) {
+        path = std::move(old_path);
+        throw;
+    }
+}
+
 bool Vault::change_master_password(const std::string& current_password, const std::string& new_password) {
     require_unlocked();
 

@@ -1,4 +1,6 @@
 #include "entry_dialog.h"
+#include "message_dialog.h"
+#include "strength_bar.h"
 #include "crypto/password_generator.h"
 
 #include <sodium.h>
@@ -59,6 +61,10 @@ EntryDialog::EntryDialog(const VaultEntry* existing,
     password_row->addWidget(password_edit, 1);
     password_row->addWidget(show_button);
     layout->addLayout(password_row);
+
+    auto* strength = new StrengthBar(this);
+    layout->addWidget(strength);
+    connect(password_edit, &QLineEdit::textChanged, strength, &StrengthBar::set_password);
 
     auto* length_label = new QLabel(tr("Length"), this);
     length_label->setObjectName(QStringLiteral("muted"));
@@ -131,11 +137,30 @@ EntryDialog::EntryDialog(const VaultEntry* existing,
         url_edit->setText(QString::fromStdString(existing->url));
         notes_edit->setPlainText(QString::fromStdString(existing->notes));
     }
+    initial_values = field_values();
     name_edit->setFocus();
 }
 
 EntryDialog::~EntryDialog() {
     password_edit->clear();
+    initial_values.clear();
+}
+
+QStringList EntryDialog::field_values() const {
+    return {name_edit->text(), username_edit->text(), password_edit->text(), url_edit->text(),
+            notes_edit->toPlainText()};
+}
+
+void EntryDialog::reject() {
+    // The automatic lock closes dialogs without asking: the vault is locked either way.
+    const bool locking = property("closing_for_lock").toBool();
+    if (!locking && field_values() != initial_values &&
+        !MessageDialog::confirm_dangerous(this, tr("Discard changes?"),
+                                          tr("The changes to this entry have not been saved."),
+                                          tr("Discard"))) {
+        return;
+    }
+    QDialog::reject();
 }
 
 VaultEntry EntryDialog::entry() const {

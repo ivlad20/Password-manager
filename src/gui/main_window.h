@@ -32,6 +32,8 @@ public:
     // Inactivity time before locking, in milliseconds (0 = never). Normally set from
     // the settings in minutes; the tests use a short time.
     void set_idle_timeout_ms(int milliseconds);
+    // Folder for exported copies; the Downloads folder when empty. Tests use a temp folder.
+    void set_export_folder(const QString& folder) { export_folder = folder; }
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -63,6 +65,9 @@ private:
     bool show_unlock_dialog(bool minimized);
     void restart_idle_timer();
 
+    void export_copy(QWidget* parent);
+    bool import_vault(QWidget* parent);
+
     void build_ui();
     void reload_list(const QString& name_to_select = {});
     void show_entry(const VaultEntry* entry);
@@ -93,6 +98,7 @@ private:
     QAction* copy_username_action = nullptr;
     QAction* copy_password_action = nullptr;
 
+    QString export_folder;
     LockSettings lock_settings;
     int idle_timeout_ms = 0;
     QTimer idle_timer;

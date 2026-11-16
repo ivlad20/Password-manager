@@ -1,4 +1,7 @@
 #include "unlock_dialog.h"
+#include "strength_bar.h"
+#include "window_activation.h"
+#include "vault_import.h"
 
 #include <sodium.h>
 #include <QDir>
@@ -9,6 +12,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QProgressBar>
+#include <QTimer>
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
@@ -24,9 +28,15 @@ static QString user_name() {
     return name;
 }
 
-UnlockDialog::UnlockDialog(QString path, QWidget* parent)
-    : QDialog(parent), vault_path(std::move(path)), create_mode(!QFileInfo::exists(vault_path)) {
-    setWindowTitle(create_mode ? tr("Create a new vault") : tr("Unlock vault"));
+UnlockDialog::UnlockDialog(QString path, Purpose dialog_purpose, QWidget* parent)
+    : QDialog(parent), vault_path(std::move(path)), purpose(dialog_purpose),
+      create_mode(dialog_purpose == Purpose::OpenOrCreate && !QFileInfo::exists(vault_path)) {
+    const bool importing = purpose == Purpose::Import;
+    if (importing) {
+        setWindowTitle(tr("Import a vault"));
+    } else {
+        setWindowTitle(create_mode ? tr("Create a new vault") : tr("Unlock vault"));
+    }
     setFixedWidth(600);
 
     auto* layout = new QVBoxLayout(this);
@@ -38,7 +48,9 @@ UnlockDialog::UnlockDialog(QString path, QWidget* parent)
     auto* greeting = new QLabel(this);
     greeting->setObjectName(QStringLiteral("title"));
     greeting->setAlignment(Qt::AlignCenter);
-    if (create_mode) {
+    if (importing) {
+        greeting->setText(tr("Import a vault"));
+    } else if (create_mode) {
         greeting->setText(tr("Welcome!"));
     } else {
         greeting->setText(name.isEmpty() ? tr("Hi!") : tr("Hi %1!").arg(name));
@@ -48,10 +60,14 @@ UnlockDialog::UnlockDialog(QString path, QWidget* parent)
     auto* intro = new QLabel(this);
     intro->setWordWrap(true);
     intro->setAlignment(Qt::AlignCenter);
-    intro->setText(create_mode
-                           ? tr("Choose a master password for your new vault.\n"
-                                "It cannot be recovered if you forget it.")
-                           : tr("Enter the master password for:"));
+    if (importing) {
+        intro->setText(tr("Enter the master password of the vault you want to import:"));
+    } else {
+        intro->setText(create_mode
+                               ? tr("Choose a master password for your new vault.\n"
+                                    "It cannot be recovered if you forget it.")
+                               : tr("Enter the master password for:"));
+    }
     layout->addWidget(intro);
 
     auto* path_label = new QLabel(QDir::toNativeSeparators(vault_path), this);
@@ -78,6 +94,14 @@ UnlockDialog::UnlockDialog(QString path, QWidget* parent)
     add_centered(password_edit, 340);
 
     if (create_mode) {
+        // The master password protects everything else, so show how strong it is.
+        // A weak one is allowed (above the minimum length), but the user sees the warning.
+        strength = new StrengthBar(this);
+        add_centered(strength, 340);
+        connect(password_edit, &QLineEdit::textChanged, strength, &StrengthBar::set_password);
+    }
+
+    if (create_mode) {
         confirm_edit = new QLineEdit(this);
         confirm_edit->setEchoMode(QLineEdit::Password);
         confirm_edit->setPlaceholderText(tr("Repeat the master password"));
@@ -98,34 +122,79 @@ UnlockDialog::UnlockDialog(QString path, QWidget* parent)
     add_centered(progress, 340);
 
     layout->addSpacing(8);
-    submit_button = new QPushButton(create_mode ? tr("Create Vault") : tr("Open Vault"), this);
+    QString submit_text = create_mode ? tr("Create Vault") : tr("Open Vault");
+    if (importing) {
+        submit_text = tr("Continue");
+    }
+    submit_button = new QPushButton(submit_text, this);
     submit_button->setObjectName(QStringLiteral("primary"));
     submit_button->setDefault(true);  // Enter in a password field presses it
     add_centered(submit_button, 160);
+
+    if (create_mode) {
+        // First start on a new computer: bring the vault from the old one instead.
+        import_button = new QPushButton(tr("Import an Existing Vault..."), this);
+        import_button->setAutoDefault(false);
+        add_centered(import_button, 240);
+        connect(import_button, &QPushButton::clicked, this, &UnlockDialog::import_existing);
+    }
     layout->addSpacing(12);
 
-    // Footer: link to the source code
-    auto* footer = new QHBoxLayout;
-    footer->setSpacing(6);
-    if (QFile::exists(QStringLiteral(":/icons/github.png"))) {
-        auto* icon = new QLabel(this);
-        icon->setPixmap(QIcon(QStringLiteral(":/icons/github.png")).pixmap(16, 16));
-        footer->addWidget(icon);
+    // Footer: link to the source code (not needed when importing from inside the app)
+    if (!importing) {
+        auto* footer = new QHBoxLayout;
+        footer->setSpacing(6);
+        if (QFile::exists(QStringLiteral(":/icons/github.png"))) {
+            auto* icon = new QLabel(this);
+            icon->setPixmap(QIcon(QStringLiteral(":/icons/github.png")).pixmap(16, 16));
+            footer->addWidget(icon);
+        }
+        auto* link = new QLabel(this);
+        link->setObjectName(QStringLiteral("muted"));
+        link->setTextFormat(Qt::RichText);
+        link->setOpenExternalLinks(true);
+        link->setText(QStringLiteral("<a href=\"%1\">%2</a>")
+                              .arg(REPOSITORY_URL, tr("Source code on GitHub")));
+        footer->addWidget(link);
+        footer->addStretch();
+        layout->addLayout(footer);
     }
-    auto* link = new QLabel(this);
-    link->setObjectName(QStringLiteral("muted"));
-    link->setTextFormat(Qt::RichText);
-    link->setOpenExternalLinks(true);
-    link->setText(QStringLiteral("<a href=\"%1\">%2</a>")
-                          .arg(REPOSITORY_URL, tr("Source code on GitHub")));
-    footer->addWidget(link);
-    footer->addStretch();
-    layout->addLayout(footer);
 
     connect(submit_button, &QPushButton::clicked, this, &UnlockDialog::submit);
     connect(&watcher, &QFutureWatcher<OpenResult>::finished, this, &UnlockDialog::on_finished);
 
     password_edit->setFocus();
+}
+
+void UnlockDialog::import_existing() {
+    if (busy) {
+        return;
+    }
+    std::shared_ptr<Vault> imported = pick_and_unlock_vault(this, vault_path);
+    if (!imported) {
+        return;
+    }
+    try {
+        // There is no vault here yet, so nothing needs a backup: save the imported one
+        // as this computer's vault.
+        imported->save_to(vault_path.toStdString());
+    } catch (const std::exception& error) {
+        show_error(tr("The vault could not be imported:\n%1").arg(QString::fromStdString(error.what())));
+        return;
+    }
+    unlocked_vault = imported;
+    emit unlocked();
+    accept();
+}
+
+void UnlockDialog::showEvent(QShowEvent* event) {
+    QDialog::showEvent(event);
+    // Open on top of other applications (unless it was shown minimized on purpose).
+    QTimer::singleShot(0, this, [this] {
+        if (isVisible() && !isMinimized()) {
+            bring_to_front(this);
+        }
+    });
 }
 
 void UnlockDialog::reject() {
@@ -196,6 +265,7 @@ void UnlockDialog::on_finished() {
 
     if (result.vault) {
         unlocked_vault = result.vault;
+        emit unlocked();
         accept();
         return;
     }
@@ -210,6 +280,9 @@ void UnlockDialog::set_busy(bool value, const QString& message) {
         confirm_edit->setEnabled(!value);
     }
     submit_button->setEnabled(!value);
+    if (import_button != nullptr) {
+        import_button->setEnabled(!value);
+    }
     progress->setVisible(value);
     if (value) {
         status_label->setStyleSheet(QStringLiteral("color: #6B7078;"));

@@ -33,6 +33,8 @@ private:
     void cmd_generate(const std::string& argument) const;
     bool cmd_lock();
     void cmd_change_master_password();
+    void cmd_export(const std::string& folder) const;
+    void cmd_import(const std::string& file);
 
     // Asks for a new password: typed twice, or generated when left empty.
     // Returns false if input ended or the two typed passwords did not match.

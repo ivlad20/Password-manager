@@ -35,8 +35,29 @@ Click *More info → Run anyway* to continue.
 - Automatic lock after a period of inactivity (1 minute to 1 hour, or never), when the window
   is minimized and when Windows is locked (Win+L); set in *Settings*
 - Change the master password: the vault is re-encrypted with a new salt and key
+- Password strength indicator (entropy estimate, penalties for common passwords, repeats,
+  sequences and keyboard rows) when creating the vault, changing the master password and
+  editing entries
+- Asks before closing the add/edit dialog with unsaved changes
+- Export a copy of the vault and import it on another computer (the current vault is backed up first)
 - Each entry remembers when it was created and last changed, and its last 5 passwords
 - Windows installer built with CPack and Inno Setup
+
+## Moving your vault to another computer
+
+The vault file is fully encrypted, so a copy of it is safe to carry on a USB stick, send
+by email or keep in cloud storage. Without the master password nothing in it can be read.
+
+1. On the old computer: *Settings → Export a Copy...* saves
+   `PasswordManager-vault-<date>.pwm` in your Downloads folder.
+2. Copy that file to the new computer.
+3. On the new computer, start the app and choose *Import an Existing Vault...* on the
+   first screen (or *Settings → Import a Vault...* if you already have a vault there).
+4. Unlock it with the same master password as on the old computer.
+
+When an import replaces an existing vault, that vault is first copied to
+`vault-backup-<date>.pwm` in the same folder. In the CLI, use the `export` and
+`import` commands.
 
 ## Architecture
 
@@ -62,7 +83,7 @@ CLI and the GUI are two thin front ends over the same `vault_core` library.
 | `src/storage/` | Binary file format of the vault and serialization of the entry list |
 | `src/core/` | `Vault`: keeps the key and decrypted entries in memory only while unlocked |
 | `src/cli/` | Interactive command loop, hidden password input in the terminal |
-| `src/gui/` | Qt 6 windows: unlock dialog, main window, add/edit dialog, settings, change master password |
+| `src/gui/` | Qt 6 windows: unlock dialog, main window, add/edit dialog, settings, change master password, import |
 | `tests/` | GoogleTest unit tests for the core and the GUI |
 | `resources/` | Application icon |
 | `docs/` | Screenshots used in this README |
@@ -191,6 +212,8 @@ Passwords are not shown while you type them.
 | `remove <name>` (or `rm`) | Delete an entry |
 | `gen [length]` | Generate a random password (default length 20, between 8 and 128) |
 | `passwd` | Change the master password (the vault is re-encrypted with a new salt) |
+| `export [folder]` | Save a copy of the vault (default: the current folder) to move it to another computer |
+| `import <file>` | Replace the vault with another vault file; the current one is backed up first |
 | `lock` | Lock the vault and ask for the master password again |
 | `quit` (or `exit`) | Lock the vault and exit |
 

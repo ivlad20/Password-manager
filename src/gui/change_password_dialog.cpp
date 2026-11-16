@@ -1,4 +1,5 @@
 #include "change_password_dialog.h"
+#include "strength_bar.h"
 
 #include <sodium.h>
 #include <QHBoxLayout>
@@ -46,6 +47,9 @@ ChangePasswordDialog::ChangePasswordDialog(std::shared_ptr<Vault> vault_to_chang
     };
     current_edit = make_password_edit(tr("Current master password"));
     new_edit = make_password_edit(tr("New master password"));
+    auto* strength = new StrengthBar(this);
+    layout->addWidget(strength);
+    connect(new_edit, &QLineEdit::textChanged, strength, &StrengthBar::set_password);
     confirm_edit = make_password_edit(tr("Repeat the new master password"));
 
     status_label = new QLabel(this);

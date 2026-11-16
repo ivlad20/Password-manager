@@ -6,9 +6,11 @@ add_executable(core_tests
         test_main.cpp
         test_crypto.cpp
         test_password_generator.cpp
+        test_password_strength.cpp
         test_serialization.cpp
         test_vault_file.cpp
         test_vault.cpp
+        test_vault_transfer.cpp
 )
 target_link_libraries(core_tests PRIVATE vault_core GTest::gtest)
 # Fixture files, e.g. a vault written by an older version of the app.
@@ -39,6 +41,12 @@ if (BUILD_GUI)
             ../src/gui/change_password_dialog.cpp
             ../src/gui/lock_settings.h
             ../src/gui/lock_settings.cpp
+            ../src/gui/strength_bar.h
+            ../src/gui/strength_bar.cpp
+            ../src/gui/vault_import.h
+            ../src/gui/vault_import.cpp
+            ../src/gui/window_activation.h
+            ../src/gui/window_activation.cpp
             ../src/gui/theme.h
             ../src/gui/theme.cpp
     )

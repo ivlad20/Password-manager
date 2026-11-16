@@ -4,10 +4,17 @@
 #include "message_dialog.h"
 #include "settings_dialog.h"
 #include "unlock_dialog.h"
+#include "vault_import.h"
+#include "window_activation.h"
+#include "core/vault_transfer.h"
 
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
+#include <QDesktopServices>
+#include <QDir>
+#include <QStandardPaths>
+#include <QUrl>
 #include <QDateTime>
 #include <QFrame>
 #include <QGuiApplication>
@@ -147,6 +154,7 @@ void MainWindow::request_lock(LockReason reason) {
             break;
         }
         previous = modal;
+        modal->setProperty("closing_for_lock", true);  // no "discard changes?" question
         modal->close();
     }
     if (QApplication::activeModalWidget() != nullptr) {
@@ -370,6 +378,11 @@ bool MainWindow::show_unlock_dialog(bool minimized) {
         // Locked because the window was minimized: do not pop up on the screen.
         dialog.setWindowState(Qt::WindowMinimized);
     }
+    connect(&dialog, &UnlockDialog::unlocked, this, [this, &dialog] {
+        vault = dialog.vault();
+        reload_list();
+        bring_to_front(this);
+    });
     if (dialog.exec() != QDialog::Accepted) {
         return false;
     }
@@ -564,20 +577,22 @@ void MainWindow::lock_now(LockReason reason) {
     hide();
 
     if (show_unlock_dialog(reason == LockReason::Minimized)) {
-        setWindowState(windowState() & ~Qt::WindowMinimized);
-        show();
-        raise();
-        activateWindow();
+        bring_to_front(this);
     } else {
         QApplication::quit();
     }
 }
 
 void MainWindow::open_settings() {
-    SettingsDialog dialog(lock_settings, [this](QWidget* parent) {
+    SettingsActions actions;
+    actions.change_master_password = [this](QWidget* parent) {
         ChangePasswordDialog change(vault, parent);
         return change.exec() == QDialog::Accepted;
-    }, this);
+    };
+    actions.export_vault = [this](QWidget* parent) { export_copy(parent); };
+    actions.import_vault = [this](QWidget* parent) { return import_vault(parent); };
+
+    SettingsDialog dialog(lock_settings, actions, this);
     if (dialog.exec() != QDialog::Accepted) {
         return;
     }
@@ -585,6 +600,68 @@ void MainWindow::open_settings() {
     updated.save();
     apply_lock_settings(updated);
     statusBar()->showMessage(tr("Settings saved."), 3000);
+}
+
+void MainWindow::export_copy(QWidget* parent) {
+    const QString folder = export_folder.isEmpty()
+                                   ? QStandardPaths::writableLocation(QStandardPaths::DownloadLocation)
+                                   : export_folder;
+    QString copy;
+    try {
+        copy = QString::fromStdString(::export_vault(vault_path.toStdString(), folder.toStdString()));
+    } catch (const std::exception& error) {
+        MessageDialog::error(parent, tr("Export failed"),
+                             tr("The vault could not be copied:\n%1").arg(QString::fromStdString(error.what())));
+        return;
+    }
+
+    const bool open_folder = MessageDialog::confirm(
+            parent, tr("Vault exported"),
+            tr("A copy of your vault was saved as:\n%1\n\n"
+               "Copy this file to the other computer and choose \"Import an Existing Vault\" there "
+               "(or Settings > Import a Vault). It opens with the same master password.")
+                    .arg(QDir::toNativeSeparators(copy)),
+            tr("Open Folder"), tr("Close"));
+    if (open_folder) {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
+    }
+}
+
+bool MainWindow::import_vault(QWidget* parent) {
+    std::shared_ptr<Vault> imported = pick_and_unlock_vault(parent, vault_path);
+    if (!imported) {
+        return false;
+    }
+    if (!MessageDialog::confirm_dangerous(
+                parent, tr("Replace your vault?"),
+                tr("Your current vault will be replaced by the imported one (%n entries). "
+                   "A backup of the current vault is saved first, in the same folder.\n\n"
+                   "From now on, unlock with the master password of the imported vault.",
+                   nullptr, static_cast<int>(imported->get_entries().size())),
+                tr("Replace"))) {
+        return false;
+    }
+
+    QString backup;
+    try {
+        backup = QString::fromStdString(backup_vault(vault_path.toStdString()));
+        imported->save_to(vault_path.toStdString());  // atomic: on failure the old vault stays
+    } catch (const std::exception& error) {
+        MessageDialog::error(parent, tr("Import failed"),
+                             tr("The vault could not be imported, your current vault was not changed:\n%1")
+                                     .arg(QString::fromStdString(error.what())));
+        return false;
+    }
+
+    clear_clipboard();
+    vault = imported;  // the previous Vault is destroyed and wipes its key and entries
+    search_edit->clear();
+    reload_list();
+    restart_idle_timer();
+    MessageDialog::information(parent, tr("Vault imported"),
+                               tr("The vault was imported. Your previous vault was saved as:\n%1")
+                                       .arg(QDir::toNativeSeparators(backup)));
+    return true;
 }
 
 void MainWindow::copy_username() {

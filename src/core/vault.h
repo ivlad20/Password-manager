@@ -41,6 +41,10 @@ public:
     // Encrypts all entries with a fresh nonce and writes them to disk.
     void save();
 
+    // Saves the vault to another file and uses that file from now on (for importing:
+    // the vault unlocked from the chosen file is saved over the default vault).
+    void save_to(const std::string& new_path);
+
     // Re-encrypts the vault with a key derived from `new_password` and a new random salt,
     // and saves it immediately. Returns false (and changes nothing) if `current_password`
     // is wrong. Throws if the file cannot be written; the old password then stays valid.
