@@ -14,7 +14,6 @@
 #include <vector>
 
 static const int MAX_UNLOCK_ATTEMPTS = 3;
-static const size_t MIN_MASTER_PASSWORD_LENGTH = 8;
 
 // Local date and time, or "unknown" for entries migrated from format version 1.
 static std::string format_timestamp(uint64_t seconds) {
@@ -112,30 +111,35 @@ bool Cli::open_or_create() {
     return unlock_vault();
 }
 
-bool Cli::create_vault() {
-    std::string password;
+bool Cli::ask_new_master_password(std::string& out) {
     std::string repeated;
-
     while (true) {
-        if (!read_hidden("New master password: ", password)) {
+        if (!read_hidden("New master password: ", out)) {
             return false;
         }
-        if (password.size() < MIN_MASTER_PASSWORD_LENGTH) {
+        if (out.size() < MIN_MASTER_PASSWORD_LENGTH) {
             std::cout << "The master password must have at least " << MIN_MASTER_PASSWORD_LENGTH
                       << " characters.\n";
             continue;
         }
         if (!read_hidden("Repeat master password: ", repeated)) {
-            wipe(password);
+            wipe(out);
             return false;
         }
-        if (password != repeated) {
-            std::cout << "The passwords do not match, try again.\n";
-            wipe(password);
-            wipe(repeated);
-            continue;
+        const bool match = out == repeated;
+        wipe(repeated);
+        if (match) {
+            return true;
         }
-        break;
+        std::cout << "The passwords do not match, try again.\n";
+        wipe(out);
+    }
+}
+
+bool Cli::create_vault() {
+    std::string password;
+    if (!ask_new_master_password(password)) {
+        return false;
     }
 
     std::cout << "Creating vault (this takes a moment)...\n";
@@ -144,11 +148,9 @@ bool Cli::create_vault() {
     } catch (const std::exception& error) {
         std::cout << "Cannot create vault: " << error.what() << "\n";
         wipe(password);
-        wipe(repeated);
         return false;
     }
     wipe(password);
-    wipe(repeated);
 
     std::cout << "Vault created at " << path << ".\n"
               << "Do not forget the master password: there is no way to recover it.\n";
@@ -190,6 +192,8 @@ bool Cli::handle_command(const std::string& command, const std::string& argument
         cmd_generate(argument);
     } else if (command == "lock") {
         return cmd_lock();
+    } else if (command == "passwd") {
+        cmd_change_master_password();
     } else if (command == "quit" || command == "exit") {
         return false;
     } else {
@@ -207,6 +211,7 @@ void Cli::cmd_help() const {
               << "  remove <name>     delete an entry\n"
               << "  gen [length]      generate a random password (default "
               << DEFAULT_PASSWORD_LENGTH << ")\n"
+              << "  passwd            change the master password\n"
               << "  lock              lock the vault and ask for the master password again\n"
               << "  quit              lock the vault and exit\n";
 }
@@ -375,6 +380,32 @@ void Cli::cmd_generate(const std::string& argument) const {
     std::string password = generate_password(length);
     std::cout << password << "\n";
     wipe(password);
+}
+
+void Cli::cmd_change_master_password() {
+    std::string current;
+    if (!read_hidden("Current master password: ", current)) {
+        return;
+    }
+    std::string replacement;
+    if (!ask_new_master_password(replacement)) {
+        wipe(current);
+        return;
+    }
+
+    std::cout << "Changing the master password (this takes a moment)...\n";
+    try {
+        if (vault->change_master_password(current, replacement)) {
+            std::cout << "Master password changed.\n";
+        } else {
+            std::cout << "Wrong current password, nothing was changed.\n";
+        }
+    } catch (const std::exception& error) {
+        std::cout << "Cannot change the master password: " << error.what() << "\n"
+                  << "The old master password still works.\n";
+    }
+    wipe(current);
+    wipe(replacement);
 }
 
 bool Cli::cmd_lock() {

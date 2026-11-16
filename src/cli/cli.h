@@ -17,6 +17,8 @@ public:
 private:
     bool open_or_create();
     bool create_vault();
+    // Asks for a new master password twice. Returns false if input ended.
+    static bool ask_new_master_password(std::string& out);
     bool unlock_vault();
 
     // Returns false when the loop should stop.
@@ -30,6 +32,7 @@ private:
     void cmd_remove(const std::string& name);
     void cmd_generate(const std::string& argument) const;
     bool cmd_lock();
+    void cmd_change_master_password();
 
     // Asks for a new password: typed twice, or generated when left empty.
     // Returns false if input ended or the two typed passwords did not match.

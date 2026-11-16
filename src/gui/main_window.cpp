@@ -1,6 +1,8 @@
 #include "main_window.h"
+#include "change_password_dialog.h"
 #include "entry_dialog.h"
 #include "message_dialog.h"
+#include "settings_dialog.h"
 #include "unlock_dialog.h"
 
 #include <QAction>
@@ -25,6 +27,11 @@
 #include <algorithm>
 #include <vector>
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <wtsapi32.h>
+#endif
+
 static const int CLIPBOARD_CLEAR_SECONDS = 30;
 
 // Local date and time, or "unknown" for entries migrated from format version 1.
@@ -45,10 +52,109 @@ MainWindow::MainWindow(QString path, QWidget* parent)
 
     clipboard_timer.setSingleShot(true);
     connect(&clipboard_timer, &QTimer::timeout, this, &MainWindow::clear_clipboard);
+
+    // Any keyboard or mouse input in the application restarts the inactivity timer.
+    idle_timer.setSingleShot(true);
+    connect(&idle_timer, &QTimer::timeout, this, [this] { request_lock(LockReason::Idle); });
+    qApp->installEventFilter(this);
+    apply_lock_settings(LockSettings::load());
+
+#ifdef Q_OS_WIN
+    // Ask Windows to tell us when the session is locked (Win+L). Only with the real
+    // Windows platform: the tests run on the "offscreen" one, which has no HWND.
+    if (QGuiApplication::platformName() == QStringLiteral("windows")) {
+        session_notifications =
+                WTSRegisterSessionNotification(reinterpret_cast<HWND>(winId()), NOTIFY_FOR_THIS_SESSION) != FALSE;
+    }
+#endif
 }
 
 MainWindow::~MainWindow() {
+#ifdef Q_OS_WIN
+    if (session_notifications) {
+        WTSUnRegisterSessionNotification(reinterpret_cast<HWND>(winId()));
+    }
+#endif
     clear_clipboard();
+}
+
+void MainWindow::apply_lock_settings(const LockSettings& settings) {
+    lock_settings = settings;
+    set_idle_timeout_ms(settings.auto_lock_minutes * 60 * 1000);
+}
+
+void MainWindow::set_idle_timeout_ms(int milliseconds) {
+    idle_timeout_ms = milliseconds;
+    restart_idle_timer();
+}
+
+void MainWindow::restart_idle_timer() {
+    if (vault && idle_timeout_ms > 0) {
+        idle_timer.start(idle_timeout_ms);
+    } else {
+        idle_timer.stop();
+    }
+}
+
+bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
+    switch (event->type()) {
+        case QEvent::KeyPress:
+        case QEvent::MouseButtonPress:
+        case QEvent::MouseMove:
+        case QEvent::Wheel:
+        case QEvent::TouchBegin:
+            if (idle_timer.isActive()) {
+                idle_timer.start();  // restarts with the same interval
+            }
+            break;
+        default:
+            break;
+    }
+    return QMainWindow::eventFilter(watched, event);
+}
+
+void MainWindow::changeEvent(QEvent* event) {
+    QMainWindow::changeEvent(event);
+    if (event->type() == QEvent::WindowStateChange && isMinimized() && vault && lock_settings.lock_on_minimize) {
+        // Not in the middle of the state change itself.
+        QTimer::singleShot(0, this, [this] { request_lock(LockReason::Minimized); });
+    }
+}
+
+bool MainWindow::nativeEvent(const QByteArray& event_type, void* message, qintptr* result) {
+#ifdef Q_OS_WIN
+    if (event_type == "windows_generic_MSG") {
+        const auto* msg = static_cast<const MSG*>(message);
+        if (msg->message == WM_WTSSESSION_CHANGE && msg->wParam == WTS_SESSION_LOCK &&
+            lock_settings.lock_on_session_lock) {
+            QTimer::singleShot(0, this, [this] { request_lock(LockReason::SessionLocked); });
+        }
+    }
+#endif
+    return QMainWindow::nativeEvent(event_type, message, result);
+}
+
+void MainWindow::request_lock(LockReason reason) {
+    if (!vault) {
+        return;  // already locked
+    }
+
+    // Close the open dialogs, newest first. A dialog that is busy (for example while it
+    // re-encrypts the vault) ignores the close and stays the active modal widget.
+    QWidget* previous = nullptr;
+    while (QWidget* modal = QApplication::activeModalWidget()) {
+        if (modal == previous) {
+            break;
+        }
+        previous = modal;
+        modal->close();
+    }
+    if (QApplication::activeModalWidget() != nullptr) {
+        QTimer::singleShot(1000, this, [this, reason] { request_lock(reason); });
+        return;
+    }
+    // Let the closed dialogs' exec() calls return first.
+    QTimer::singleShot(0, this, [this, reason] { lock_now(reason); });
 }
 
 // A light gray rounded container (styled through "QFrame#panel" in style.qss).
@@ -84,11 +190,13 @@ void MainWindow::build_ui() {
     copy_username_action->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_B));
     copy_password_action = new QAction(tr("Copy password"), this);
     copy_password_action->setShortcut(QKeySequence::Copy);
+    auto* settings_action = new QAction(tr("Settings"), this);
+    settings_action->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));
     auto* lock_action = new QAction(tr("Lock"), this);
     lock_action->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_L));
 
-    const QList<QAction*> actions = {add_action, edit_action, delete_action,
-                                     copy_username_action, copy_password_action, lock_action};
+    const QList<QAction*> actions = {add_action, edit_action, delete_action, copy_username_action,
+                                     copy_password_action, settings_action, lock_action};
     for (QAction* action : actions) {
         action->setToolTip(QStringLiteral("%1 (%2)").arg(action->text(),
                                                          action->shortcut().toString(QKeySequence::NativeText)));
@@ -100,6 +208,7 @@ void MainWindow::build_ui() {
     connect(delete_action, &QAction::triggered, this, &MainWindow::delete_entry);
     connect(copy_username_action, &QAction::triggered, this, &MainWindow::copy_username);
     connect(copy_password_action, &QAction::triggered, this, &MainWindow::copy_password);
+    connect(settings_action, &QAction::triggered, this, &MainWindow::open_settings);
     connect(lock_action, &QAction::triggered, this, &MainWindow::lock);
 
     auto* central = new QWidget(this);
@@ -238,6 +347,7 @@ void MainWindow::build_ui() {
     add_action_button(copy_password_action, QStringLiteral("primary"));
     add_action_button(delete_action, QStringLiteral("danger"));
     right_layout->addStretch();
+    add_action_button(settings_action, QStringLiteral("secondary"));
     add_action_button(lock_action, QStringLiteral("secondary"));
 
     columns->addWidget(left, 3);
@@ -250,7 +360,16 @@ void MainWindow::build_ui() {
 }
 
 bool MainWindow::unlock() {
-    UnlockDialog dialog(vault_path, this);
+    return show_unlock_dialog(false);
+}
+
+bool MainWindow::show_unlock_dialog(bool minimized) {
+    // No parent: while the main window is hidden the dialog needs its own taskbar button.
+    UnlockDialog dialog(vault_path);
+    if (minimized) {
+        // Locked because the window was minimized: do not pop up on the screen.
+        dialog.setWindowState(Qt::WindowMinimized);
+    }
     if (dialog.exec() != QDialog::Accepted) {
         return false;
     }
@@ -258,6 +377,7 @@ bool MainWindow::unlock() {
     reload_list();
     statusBar()->showMessage(tr("Vault unlocked: %n entries", nullptr,
                                 static_cast<int>(vault->get_entries().size())), 5000);
+    restart_idle_timer();
     return true;
 }
 
@@ -428,6 +548,14 @@ void MainWindow::delete_entry() {
 }
 
 void MainWindow::lock() {
+    lock_now(LockReason::Manual);
+}
+
+void MainWindow::lock_now(LockReason reason) {
+    if (!vault) {
+        return;
+    }
+    idle_timer.stop();
     clear_clipboard();
     list->clear();
     show_entry(nullptr);
@@ -435,11 +563,28 @@ void MainWindow::lock() {
     vault.reset();  // the Vault destructor wipes the key and the entries
     hide();
 
-    if (unlock()) {
+    if (show_unlock_dialog(reason == LockReason::Minimized)) {
+        setWindowState(windowState() & ~Qt::WindowMinimized);
         show();
+        raise();
+        activateWindow();
     } else {
         QApplication::quit();
     }
+}
+
+void MainWindow::open_settings() {
+    SettingsDialog dialog(lock_settings, [this](QWidget* parent) {
+        ChangePasswordDialog change(vault, parent);
+        return change.exec() == QDialog::Accepted;
+    }, this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    const LockSettings updated = dialog.settings();
+    updated.save();
+    apply_lock_settings(updated);
+    statusBar()->showMessage(tr("Settings saved."), 3000);
 }
 
 void MainWindow::copy_username() {

@@ -62,7 +62,7 @@ QLabel#placeholder {
 
 /* ---------- Inputs ---------- */
 
-QLineEdit, QPlainTextEdit, QSpinBox {
+QLineEdit, QPlainTextEdit, QSpinBox, QComboBox {
     background: #F4F5F2;
     border: 1px solid #D2D4CE;
     border-radius: 10px;
@@ -71,9 +71,25 @@ QLineEdit, QPlainTextEdit, QSpinBox {
     selection-color: #1F2328;
 }
 
-QLineEdit:focus, QPlainTextEdit:focus, QSpinBox:focus {
+QLineEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QComboBox:focus {
     border: 2px solid #93D473;
     padding: 6px 9px;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 24px;
+}
+
+QComboBox QAbstractItemView {
+    background: #FFFFFF;
+    border: 1px solid #D2D4CE;
+    selection-background-color: #93D473;
+    selection-color: #1F2328;
+}
+
+QCheckBox {
+    spacing: 8px;
 }
 
 QLineEdit:disabled {

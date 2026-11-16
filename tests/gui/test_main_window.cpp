@@ -1,9 +1,14 @@
 #include "gui/main_window.h"
+#include "gui/lock_settings.h"
 #include "core/vault.h"
 #include "gui_test_helpers.h"
 #include "../test_helpers.h"
 
+#include <QCheckBox>
 #include <QClipboard>
+#include <QComboBox>
+#include <QFile>
+#include <QKeyEvent>
 #include <QGuiApplication>
 #include <QListWidget>
 #include <QPlainTextEdit>
@@ -20,6 +25,23 @@ QStringList visible_names(QListWidget* list) {
         if (!list->item(i)->isHidden()) names << list->item(i)->text();
     }
     return names;
+}
+
+// Like on_next_dialog, but without blocking the caller: polls until a modal dialog of
+// the given class is shown. Needed when the dialog opens by itself (auto-lock) or from
+// inside another dialog.
+void when_dialog_shown(const char* class_name, std::function<void(QWidget*)> handle) {
+    auto* timer = new QTimer;
+    timer->setInterval(20);
+    QObject::connect(timer, &QTimer::timeout, [timer, class_name, handle] {
+        QWidget* modal = QApplication::activeModalWidget();
+        if (modal != nullptr && modal->inherits(class_name) && modal->isVisible()) {
+            timer->stop();
+            timer->deleteLater();
+            handle(modal);
+        }
+    });
+    timer->start();
 }
 
 void select(QListWidget* list, const QString& name) {
@@ -46,6 +68,8 @@ protected:
             vault.save();
         }
 
+        // Every test starts with the default settings.
+        QFile::remove(LockSettings::file_path());
         window = std::make_unique<MainWindow>(QString::fromStdString(file));
         on_next_dialog([](QWidget* dialog) {
             line_edits(dialog)[0]->setText(QString::fromStdString(MASTER));
@@ -59,6 +83,7 @@ protected:
 
     void TearDown() override {
         window.reset();
+        QFile::remove(LockSettings::file_path());
         TempDirTest::TearDown();
     }
 
@@ -67,6 +92,23 @@ protected:
         Vault vault = Vault::load(file);
         EXPECT_TRUE(vault.unlock(MASTER));
         return vault;
+    }
+
+    // Expects the unlock dialog (shown after an automatic lock) and unlocks again.
+    // Turns the inactivity timer off first, so the window does not lock again right away.
+    void unlock_when_asked(bool& asked, bool& was_locked, bool& was_minimized) {
+        when_dialog_shown("UnlockDialog", [&, this](QWidget* dialog) {
+            asked = true;
+            was_locked = list->count() == 0 && !window->isVisible();
+            was_minimized = dialog->isMinimized();
+            window->set_idle_timeout_ms(0);
+            line_edits(dialog)[0]->setText(QString::fromStdString(MASTER));
+            QMetaObject::invokeMethod(dialog, "submit");
+        });
+    }
+
+    [[nodiscard]] bool unlocked_again(const bool& asked) const {
+        return wait_until([&] { return asked && window->isVisible() && list->count() == 3; });
     }
 
     QLineEdit* field_with_text(const QString& text) const {
@@ -206,4 +248,141 @@ TEST_F(MainWindowTest, DeleteAsksForConfirmation) {
     action(window.get(), "Delete")->trigger();
     EXPECT_EQ(visible_names(list), (QStringList{"bank", "Gmail"}));
     EXPECT_EQ(reload().find_entry("GitHub"), nullptr);
+}
+
+TEST_F(MainWindowTest, LocksAfterInactivity) {
+    bool asked = false, was_locked = false, was_minimized = true;
+    unlock_when_asked(asked, was_locked, was_minimized);
+    window->set_idle_timeout_ms(100);
+
+    ASSERT_TRUE(unlocked_again(asked));
+    EXPECT_TRUE(was_locked);       // the entries were gone while the dialog was shown
+    EXPECT_FALSE(was_minimized);   // after inactivity the dialog is shown normally
+}
+
+TEST_F(MainWindowTest, InputRestartsInactivityTimer) {
+    window->set_idle_timeout_ms(400);
+    QElapsedTimer elapsed;
+    elapsed.start();
+    while (elapsed.elapsed() < 1000) {
+        QKeyEvent press(QEvent::KeyPress, Qt::Key_Shift, Qt::NoModifier);
+        QApplication::sendEvent(list, &press);
+        QApplication::processEvents(QEventLoop::AllEvents, 50);
+    }
+    window->set_idle_timeout_ms(0);
+    EXPECT_EQ(list->count(), 3);
+    EXPECT_TRUE(window->isVisible());
+}
+
+TEST_F(MainWindowTest, AutoLockClosesOpenDialogs) {
+    bool asked = false, was_locked = false, was_minimized = true;
+    unlock_when_asked(asked, was_locked, was_minimized);
+    // The add dialog is left open; the inactivity timer closes it before locking.
+    when_dialog_shown("EntryDialog", [this](QWidget*) { window->set_idle_timeout_ms(100); });
+    action(window.get(), "Add")->trigger();
+
+    ASSERT_TRUE(unlocked_again(asked));
+    EXPECT_TRUE(was_locked);
+    EXPECT_EQ(QApplication::activeModalWidget(), nullptr);
+    EXPECT_EQ(reload().get_entries().size(), 3u);
+}
+
+TEST_F(MainWindowTest, MinimizingLocksWhenEnabled) {
+    LockSettings settings;
+    settings.auto_lock_minutes = 0;
+    settings.lock_on_minimize = false;
+    window->apply_lock_settings(settings);
+    window->showMinimized();
+    wait_until([] { return false; }, 300);
+    EXPECT_EQ(list->count(), 3);  // still unlocked
+    window->showNormal();
+
+    settings.lock_on_minimize = true;
+    window->apply_lock_settings(settings);
+    bool asked = false, was_locked = false, was_minimized = false;
+    unlock_when_asked(asked, was_locked, was_minimized);
+    window->showMinimized();
+
+    ASSERT_TRUE(unlocked_again(asked));
+    EXPECT_TRUE(was_locked);
+    EXPECT_TRUE(was_minimized);  // the unlock dialog does not pop up over other windows
+    EXPECT_FALSE(window->isMinimized());
+}
+
+TEST_F(MainWindowTest, SettingsAreSaved) {
+    when_dialog_shown("SettingsDialog", [](QWidget* dialog) {
+        auto* combo = dialog->findChild<QComboBox*>();
+        combo->setCurrentIndex(combo->findData(15));
+        for (QCheckBox* check : dialog->findChildren<QCheckBox*>()) {
+            if (check->text().contains("minimized")) check->setChecked(false);
+        }
+        button(dialog, "Save")->click();
+    });
+    action(window.get(), "Settings")->trigger();
+
+    const LockSettings saved = LockSettings::load();
+    EXPECT_EQ(saved.auto_lock_minutes, 15);
+    EXPECT_FALSE(saved.lock_on_minimize);
+    EXPECT_TRUE(saved.lock_on_session_lock);
+}
+
+TEST_F(MainWindowTest, ChangeMasterPasswordFromSettings) {
+    QString wrong_password_message;
+    QString settings_message;
+    when_dialog_shown("SettingsDialog", [&](QWidget* settings) {
+        when_dialog_shown("ChangePasswordDialog", [&](QWidget* dialog) {
+            line_edit_with_placeholder(dialog, "Current")->setText("not the password");
+            line_edit_with_placeholder(dialog, "New master")->setText("brand new master");
+            line_edit_with_placeholder(dialog, "Repeat")->setText("brand new master");
+            QMetaObject::invokeMethod(dialog, "submit");
+            wait_until([&] { return visible_text(dialog).contains("wrong"); });
+            wrong_password_message = visible_text(dialog);
+
+            line_edit_with_placeholder(dialog, "Current")->setText(QString::fromStdString(MASTER));
+            line_edit_with_placeholder(dialog, "New master")->setText("brand new master");
+            line_edit_with_placeholder(dialog, "Repeat")->setText("brand new master");
+            QMetaObject::invokeMethod(dialog, "submit");
+        });
+        button(settings, "Change Master Password...")->click();
+        settings_message = visible_text(settings);
+        button(settings, "Cancel")->click();
+    });
+    action(window.get(), "Settings")->trigger();
+
+    EXPECT_TRUE(wrong_password_message.contains("wrong")) << wrong_password_message.toStdString();
+    EXPECT_TRUE(settings_message.contains("was changed")) << settings_message.toStdString();
+
+    Vault saved = Vault::load(file);
+    EXPECT_FALSE(saved.unlock(MASTER));
+    ASSERT_TRUE(saved.unlock("brand new master"));
+    EXPECT_EQ(saved.get_entries().size(), 3u);
+}
+
+TEST_F(MainWindowTest, ChangeMasterPasswordValidatesInput) {
+    QStringList errors;
+    when_dialog_shown("SettingsDialog", [&](QWidget* settings) {
+        when_dialog_shown("ChangePasswordDialog", [&](QWidget* dialog) {
+            auto attempt = [&](const QString& current, const QString& replacement, const QString& repeated) {
+                line_edit_with_placeholder(dialog, "Current")->setText(current);
+                line_edit_with_placeholder(dialog, "New master")->setText(replacement);
+                line_edit_with_placeholder(dialog, "Repeat")->setText(repeated);
+                QMetaObject::invokeMethod(dialog, "submit");
+                errors << visible_text(dialog);
+            };
+            const QString master = QString::fromStdString(MASTER);
+            attempt(master, "short", "short");
+            attempt(master, "long enough 1", "long enough 2");
+            attempt(master, master, master);
+            button(dialog, "Cancel")->click();
+        });
+        button(settings, "Change Master Password...")->click();
+        button(settings, "Cancel")->click();
+    });
+    action(window.get(), "Settings")->trigger();
+
+    ASSERT_EQ(errors.size(), 3);
+    EXPECT_TRUE(errors[0].contains("at least 8")) << errors[0].toStdString();
+    EXPECT_TRUE(errors[1].contains("do not match")) << errors[1].toStdString();
+    EXPECT_TRUE(errors[2].contains("same as the current")) << errors[2].toStdString();
+    EXPECT_TRUE(reload().is_unlocked());  // the old password still opens the vault
 }

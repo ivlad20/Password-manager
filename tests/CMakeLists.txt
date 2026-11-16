@@ -33,10 +33,19 @@ if (BUILD_GUI)
             ../src/gui/entry_dialog.cpp
             ../src/gui/message_dialog.h
             ../src/gui/message_dialog.cpp
+            ../src/gui/settings_dialog.h
+            ../src/gui/settings_dialog.cpp
+            ../src/gui/change_password_dialog.h
+            ../src/gui/change_password_dialog.cpp
+            ../src/gui/lock_settings.h
+            ../src/gui/lock_settings.cpp
             ../src/gui/theme.h
             ../src/gui/theme.cpp
     )
     target_link_libraries(gui_tests PRIVATE vault_core GTest::gtest Qt6::Widgets Qt6::Concurrent)
+    if (WIN32)
+        target_link_libraries(gui_tests PRIVATE wtsapi32)
+    endif ()
     # The tests load the real style sheet too, so they run against the final look.
     qt_add_resources(gui_tests "ui_resources"
             PREFIX "/"

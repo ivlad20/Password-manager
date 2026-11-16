@@ -3,10 +3,13 @@
 #include <gtest/gtest.h>
 #include <sodium.h>
 #include <QApplication>
+#include <QStandardPaths>
 
 // Widgets need a QApplication, which must be created before any test runs.
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
+    // Settings go to a separate test folder, never to the user's real settings.ini.
+    QStandardPaths::setTestModeEnabled(true);
     theme::apply(app);
     if (sodium_init() < 0) {
         return 1;

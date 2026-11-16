@@ -11,6 +11,9 @@
 #include <string>
 #include <vector>
 
+// Minimum length asked for a new master password (by the CLI and the GUI).
+constexpr size_t MIN_MASTER_PASSWORD_LENGTH = 8;
+
 // A vault bound to one file on disk.
 // The key and the decrypted entries only live in memory between unlock() and lock();
 // the key is never written to disk. A wrong master password is detected because
@@ -38,6 +41,11 @@ public:
     // Encrypts all entries with a fresh nonce and writes them to disk.
     void save();
 
+    // Re-encrypts the vault with a key derived from `new_password` and a new random salt,
+    // and saves it immediately. Returns false (and changes nothing) if `current_password`
+    // is wrong. Throws if the file cannot be written; the old password then stays valid.
+    bool change_master_password(const std::string& current_password, const std::string& new_password);
+
     // Throws if an entry with the same name already exists.
     void add_entry(const VaultEntry& entry);
     // Replaces the entry called `name` (the name itself may change).
@@ -52,6 +60,9 @@ public:
 private:
     Vault(std::string path, VaultFile file);
     void require_unlocked() const;
+    // Encrypts the entries with `with_key` and a fresh nonce, writes `base` with the new
+    // ciphertext to disk and returns what was written.
+    VaultFile write_entries(VaultFile base, const std::vector<uint8_t>& with_key) const;
 
     std::string path;
     VaultFile file;

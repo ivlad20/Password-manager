@@ -51,11 +51,21 @@ if (BUILD_GUI)
             src/gui/entry_dialog.cpp
             src/gui/message_dialog.h
             src/gui/message_dialog.cpp
+            src/gui/settings_dialog.h
+            src/gui/settings_dialog.cpp
+            src/gui/change_password_dialog.h
+            src/gui/change_password_dialog.cpp
+            src/gui/lock_settings.h
+            src/gui/lock_settings.cpp
             src/gui/theme.h
             src/gui/theme.cpp
             resources/app.rc
     )
     target_link_libraries(PasswordManagerGui PRIVATE vault_core Qt6::Widgets Qt6::Concurrent)
+    if (WIN32)
+        # WTSRegisterSessionNotification: lock the vault when Windows is locked (Win+L).
+        target_link_libraries(PasswordManagerGui PRIVATE wtsapi32)
+    endif ()
 
     # Files embedded in the exe and read at runtime through ":/<name>" paths.
     qt_add_resources(PasswordManagerGui "ui_resources"
