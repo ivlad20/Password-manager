@@ -123,6 +123,8 @@ EntryDialog::EntryDialog(const VaultEntry* existing,
 
     if (existing != nullptr) {
         original_name = existing->name;
+        original_favorite = existing->favorite;
+        original_tags = existing->tags;
         name_edit->setText(QString::fromStdString(existing->name));
         username_edit->setText(QString::fromStdString(existing->username));
         password_edit->setText(QString::fromStdString(existing->password));
@@ -143,6 +145,8 @@ VaultEntry EntryDialog::entry() const {
     result.password = password_edit->text().toStdString();
     result.url = url_edit->text().trimmed().toStdString();
     result.notes = notes_edit->toPlainText().toStdString();
+    result.favorite = original_favorite;
+    result.tags = original_tags;
     return result;
 }
 

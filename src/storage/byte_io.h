@@ -9,6 +9,15 @@
 // Little-endian helpers used by the vault file format and the entry serializer.
 // The byte order is fixed so a vault written on one machine opens on any other.
 
+inline void append_u8(std::vector<uint8_t>& out, uint8_t value) {
+    out.push_back(value);
+}
+
+inline void append_u16(std::vector<uint8_t>& out, uint16_t value) {
+    out.push_back(static_cast<uint8_t>(value));
+    out.push_back(static_cast<uint8_t>(value >> 8));
+}
+
 inline void append_u32(std::vector<uint8_t>& out, uint32_t value) {
     for (int i = 0; i < 4; ++i) {
         out.push_back(static_cast<uint8_t>(value >> (8 * i)));
@@ -39,6 +48,18 @@ inline void append_string(std::vector<uint8_t>& out, const std::string& value) {
 class ByteReader {
 public:
     ByteReader(const uint8_t* data, size_t size) : data(data), size(size) {}
+
+    uint8_t read_u8() {
+        require(1);
+        return data[pos++];
+    }
+
+    uint16_t read_u16() {
+        require(2);
+        const auto value = static_cast<uint16_t>(data[pos] | (data[pos + 1] << 8));
+        pos += 2;
+        return value;
+    }
 
     uint32_t read_u32() {
         require(4);
@@ -77,6 +98,23 @@ public:
         require(length);
         std::string value(reinterpret_cast<const char*>(data + pos), length);
         pos += length;
+        return value;
+    }
+
+    // Reads the next `count` bytes as a separate reader and skips them here.
+    // Used for size-prefixed blocks, so reading past a block's end is caught.
+    ByteReader read_block(size_t count) {
+        require(count);
+        ByteReader block(data + pos, count);
+        pos += count;
+        return block;
+    }
+
+    // Raw bytes of the given length as a string (no length prefix).
+    std::string read_raw_string(size_t count) {
+        require(count);
+        std::string value(reinterpret_cast<const char*>(data + pos), count);
+        pos += count;
         return value;
     }
 

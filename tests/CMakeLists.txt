@@ -11,6 +11,8 @@ add_executable(core_tests
         test_vault.cpp
 )
 target_link_libraries(core_tests PRIVATE vault_core GTest::gtest)
+# Fixture files, e.g. a vault written by an older version of the app.
+target_compile_definitions(core_tests PRIVATE TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
 # PRE_TEST: list the tests when ctest runs, not at build time, so the DLLs
 # that vcpkg copies next to the .exe are already there.
 gtest_discover_tests(core_tests DISCOVERY_MODE PRE_TEST)

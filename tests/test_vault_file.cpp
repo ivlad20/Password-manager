@@ -44,7 +44,15 @@ TEST_F(VaultFileTest, LayoutStartsWithMagicAndVersion) {
     const std::string raw = read_file(path("v.pwm"));
     EXPECT_EQ(raw.size(), HEADER_SIZE + original.ciphertext.size());
     EXPECT_EQ(raw.substr(0, 4), "PWMV");
-    EXPECT_EQ(raw.substr(4, 4), std::string("\x01\x00\x00\x00", 4));  // version 1, little-endian
+    EXPECT_EQ(raw.substr(4, 4), std::string("\x02\x00\x00\x00", 4));  // version 2, little-endian
+}
+
+TEST_F(VaultFileTest, VersionIsReadBack) {
+    VaultFile file = sample_file();
+    EXPECT_EQ(file.version, VAULT_FORMAT_VERSION);
+    file.version = VAULT_FORMAT_VERSION_1;
+    write_vault_file(path("v.pwm"), file);
+    EXPECT_EQ(read_vault_file(path("v.pwm")).version, VAULT_FORMAT_VERSION_1);
 }
 
 // The atomic save writes a temporary file first; it must not be left behind.
@@ -72,9 +80,13 @@ TEST_F(VaultFileTest, WrongMagicThrows) {
 TEST_F(VaultFileTest, UnknownVersionThrows) {
     write_vault_file(path("v.pwm"), sample_file());
     std::string raw = read_file(path("v.pwm"));
-    raw[4] = 2;
+    raw[4] = 3;  // a version from the future
     write_file(path("v.pwm"), raw);
     EXPECT_THROW(read_vault_file(path("v.pwm")), std::runtime_error);
+
+    VaultFile file = sample_file();
+    file.version = 3;
+    EXPECT_THROW(write_vault_file(path("w.pwm"), file), std::runtime_error);
 }
 
 // A tampered header must not be able to request gigabytes of memory for Argon2.

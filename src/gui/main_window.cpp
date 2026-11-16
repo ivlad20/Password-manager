@@ -6,6 +6,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
+#include <QDateTime>
 #include <QFrame>
 #include <QGuiApplication>
 #include <QHBoxLayout>
@@ -13,6 +14,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QLocale>
 #include <QMimeData>
 #include <QPlainTextEdit>
 #include <QStackedLayout>
@@ -24,6 +26,15 @@
 #include <vector>
 
 static const int CLIPBOARD_CLEAR_SECONDS = 30;
+
+// Local date and time, or "unknown" for entries migrated from format version 1.
+static QString format_timestamp(uint64_t seconds) {
+    if (seconds == 0) {
+        return QObject::tr("unknown");
+    }
+    const QDateTime time = QDateTime::fromSecsSinceEpoch(static_cast<qint64>(seconds));
+    return QLocale().toString(time, QLocale::ShortFormat);
+}
 
 MainWindow::MainWindow(QString path, QWidget* parent)
     : QMainWindow(parent), vault_path(std::move(path)) {
@@ -188,6 +199,10 @@ void MainWindow::build_ui() {
     notes_value->setReadOnly(true);
     form->addWidget(notes_value, 1);
 
+    dates_value = new QLabel(details);
+    dates_value->setObjectName(QStringLiteral("muted"));
+    form->addWidget(dates_value);
+
     stack->addWidget(details);
 
     connect(copy_user_button, &QToolButton::clicked, this, &MainWindow::copy_username);
@@ -324,6 +339,7 @@ void MainWindow::show_entry(const VaultEntry* entry) {
         password_value->clear();
         url_value->clear();
         notes_value->clear();
+        dates_value->clear();
         return;
     }
 
@@ -331,6 +347,9 @@ void MainWindow::show_entry(const VaultEntry* entry) {
     username_value->setText(QString::fromStdString(entry->username));
     password_value->setText(QString::fromStdString(entry->password));
     notes_value->setPlainText(QString::fromStdString(entry->notes));
+    dates_value->setText(tr("Created: %1    Modified: %2")
+                                 .arg(format_timestamp(entry->created_at),
+                                      format_timestamp(entry->modified_at)));
 
     // Only http(s) addresses become clickable links; everything else is shown as plain text.
     const QString url = QString::fromStdString(entry->url);

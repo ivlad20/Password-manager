@@ -7,3 +7,5 @@ CLAUDE.md
 *.pwm.tmp
 build/
 vcpkg_installed/
+# Test fixtures are vaults on purpose (with a known test password)
+!tests/data/*.pwm
