@@ -32,6 +32,10 @@ Click *More info → Run anyway* to continue.
   so a crash never leaves a half-written vault
 - Random password generator based on libsodium's cryptographically secure RNG
 - GUI: search, copy to clipboard (cleared automatically after 30 seconds), show/hide password
+- Automatic lock after a period of inactivity (1 minute to 1 hour, or never), when the window
+  is minimized and when Windows is locked (Win+L); set in *Settings*
+- Change the master password: the vault is re-encrypted with a new salt and key
+- Each entry remembers when it was created and last changed, and its last 5 passwords
 - Windows installer built with CPack and Inno Setup
 
 ## Architecture
@@ -58,7 +62,7 @@ CLI and the GUI are two thin front ends over the same `vault_core` library.
 | `src/storage/` | Binary file format of the vault and serialization of the entry list |
 | `src/core/` | `Vault`: keeps the key and decrypted entries in memory only while unlocked |
 | `src/cli/` | Interactive command loop, hidden password input in the terminal |
-| `src/gui/` | Qt 6 windows: unlock dialog, main window, add/edit dialog |
+| `src/gui/` | Qt 6 windows: unlock dialog, main window, add/edit dialog, settings, change master password |
 | `tests/` | GoogleTest unit tests for the core and the GUI |
 | `resources/` | Application icon |
 | `docs/` | Screenshots used in this README |
@@ -186,6 +190,7 @@ Passwords are not shown while you type them.
 | `edit <name>` | Change an entry; press Enter to keep a field unchanged |
 | `remove <name>` (or `rm`) | Delete an entry |
 | `gen [length]` | Generate a random password (default length 20, between 8 and 128) |
+| `passwd` | Change the master password (the vault is re-encrypted with a new salt) |
 | `lock` | Lock the vault and ask for the master password again |
 | `quit` (or `exit`) | Lock the vault and exit |
 

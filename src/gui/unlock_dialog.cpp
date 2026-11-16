@@ -13,8 +13,6 @@
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
 
-static const int MIN_MASTER_PASSWORD_LENGTH = 8;
-
 static const QString REPOSITORY_URL = QStringLiteral("https://github.com/ivlad20/Password-manager");
 
 // First name of the signed-in Windows / Linux user, for the greeting.
@@ -146,7 +144,7 @@ void UnlockDialog::submit() {
     std::string password = password_edit->text().toStdString();
 
     if (create_mode) {
-        if (password_edit->text().size() < MIN_MASTER_PASSWORD_LENGTH) {
+        if (password_edit->text().size() < static_cast<qsizetype>(MIN_MASTER_PASSWORD_LENGTH)) {
             show_error(tr("The master password must have at least %1 characters.").arg(MIN_MASTER_PASSWORD_LENGTH));
             sodium_memzero(password.data(), password.size());
             return;

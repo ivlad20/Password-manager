@@ -267,3 +267,30 @@ TEST_F(VaultTest, OpensVersion1VaultAndUpgradesItOnSave) {
     ASSERT_TRUE(reloaded.unlock("fixture-password-v1"));
     check_entries(reloaded);
 }
+
+TEST_F(VaultTest, ChangeMasterPassword) {
+    const std::string file = make_vault();
+    const VaultFile before = read_vault_file(file);
+    {
+        Vault vault = Vault::load(file);
+        ASSERT_TRUE(vault.unlock(MASTER));
+
+        // A wrong current password changes nothing.
+        EXPECT_FALSE(vault.change_master_password("wrong password", "new master password"));
+        EXPECT_EQ(read_vault_file(file).salt, before.salt);
+
+        ASSERT_TRUE(vault.change_master_password(MASTER, "new master password"));
+        // The vault stays unlocked and usable, and later saves use the new key.
+        EXPECT_TRUE(vault.is_unlocked());
+        vault.add_entry({"GitHub", "ivlad", "gh-Pass-99", "", ""});
+        vault.save();
+    }
+
+    EXPECT_NE(read_vault_file(file).salt, before.salt);
+
+    Vault reloaded = Vault::load(file);
+    EXPECT_FALSE(reloaded.unlock(MASTER));
+    ASSERT_TRUE(reloaded.unlock("new master password"));
+    EXPECT_EQ(reloaded.get_entries().size(), 3u);
+    EXPECT_NE(reloaded.find_entry("Gmail"), nullptr);
+}

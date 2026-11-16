@@ -150,21 +150,56 @@ void Vault::lock() {
 
 void Vault::save() {
     require_unlocked();
+    // Only update the in-memory copy once the write succeeded.
+    file = write_entries(file, key);
+}
 
+bool Vault::change_master_password(const std::string& current_password, const std::string& new_password) {
+    require_unlocked();
+
+    // Check the current password by deriving its key again (constant-time comparison).
+    std::vector<uint8_t> check = master_password_derive(current_password, file.salt.data(),
+                                                        file.opslimit, static_cast<size_t>(file.memlimit));
+    const bool matches = check.size() == key.size() && sodium_memcmp(check.data(), key.data(), key.size()) == 0;
+    wipe(check);
+    if (!matches) {
+        return false;
+    }
+
+    // A new salt, so the new key has nothing in common with the old one.
+    VaultFile updated = file;
+    updated.opslimit = crypto_pwhash_OPSLIMIT_MODERATE;
+    updated.memlimit = crypto_pwhash_MEMLIMIT_MODERATE;
+    randombytes_buf(updated.salt.data(), updated.salt.size());
+
+    std::vector<uint8_t> new_key = master_password_derive(new_password, updated.salt.data(),
+                                                          updated.opslimit, static_cast<size_t>(updated.memlimit));
+    try {
+        // The save is atomic: on failure the file on disk still uses the old password.
+        updated = write_entries(std::move(updated), new_key);
+    } catch (...) {
+        wipe(new_key);
+        throw;
+    }
+
+    wipe(key);
+    key = std::move(new_key);
+    file = std::move(updated);
+    return true;
+}
+
+VaultFile Vault::write_entries(VaultFile base, const std::vector<uint8_t>& with_key) const {
     std::vector<uint8_t> payload = serialize_entries(entries);
     // A new nonce on every save: reusing a nonce with the same key breaks the encryption.
     std::vector<uint8_t> nonce = generate_nonce();
-    std::vector<uint8_t> ciphertext = encrypt_bytes(payload, key, nonce);
+    std::vector<uint8_t> ciphertext = encrypt_bytes(payload, with_key, nonce);
     wipe(payload);
 
-    VaultFile updated = file;
-    updated.version = VAULT_FORMAT_VERSION;  // an old vault is upgraded on its first save
-    updated.nonce = std::move(nonce);
-    updated.ciphertext = std::move(ciphertext);
-    write_vault_file(path, updated);
-
-    // Only update the in-memory copy once the write succeeded.
-    file = std::move(updated);
+    base.version = VAULT_FORMAT_VERSION;  // an old vault is upgraded on its first save
+    base.nonce = std::move(nonce);
+    base.ciphertext = std::move(ciphertext);
+    write_vault_file(path, base);
+    return base;
 }
 
 void Vault::add_entry(const VaultEntry& entry) {
