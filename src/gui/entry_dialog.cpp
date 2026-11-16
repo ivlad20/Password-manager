@@ -2,8 +2,6 @@
 #include "crypto/password_generator.h"
 
 #include <sodium.h>
-#include <QDialogButtonBox>
-#include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -18,65 +16,110 @@ EntryDialog::EntryDialog(const VaultEntry* existing,
                          QWidget* parent)
     : QDialog(parent), name_taken(std::move(name_taken_check)) {
     setWindowTitle(existing ? tr("Edit entry") : tr("Add entry"));
-    setMinimumWidth(480);
+    setFixedWidth(500);
 
     auto* layout = new QVBoxLayout(this);
-    auto* form = new QFormLayout;
+    layout->setContentsMargins(24, 20, 24, 20);
+    layout->setSpacing(4);
 
+    auto* title = new QLabel(existing ? tr("Edit entry") : tr("New entry"), this);
+    title->setObjectName(QStringLiteral("title"));
+    layout->addWidget(title);
+    layout->addSpacing(8);
+
+    // Each field: a small label above the input.
+    auto add_label = [&](const QString& text) {
+        auto* label = new QLabel(text, this);
+        label->setObjectName(QStringLiteral("field_label"));
+        layout->addWidget(label);
+    };
+
+    add_label(tr("NAME"));
     name_edit = new QLineEdit(this);
     name_edit->setPlaceholderText(tr("e.g. Gmail"));
-    form->addRow(tr("Name:"), name_edit);
+    layout->addWidget(name_edit);
 
+    add_label(tr("USERNAME"));
     username_edit = new QLineEdit(this);
-    form->addRow(tr("Username:"), username_edit);
+    username_edit->setPlaceholderText(tr("e.g. name@example.com"));
+    layout->addWidget(username_edit);
 
-    // Password field with a show/hide toggle, plus a generator with a length selector.
+    // Password with a show/hide toggle, then the generator on its own row.
+    add_label(tr("PASSWORD"));
     password_edit = new QLineEdit(this);
     password_edit->setEchoMode(QLineEdit::Password);
 
     auto* show_button = new QToolButton(this);
     show_button->setText(tr("Show"));
     show_button->setCheckable(true);
+    show_button->setCursor(Qt::PointingHandCursor);
+
+    auto* password_row = new QHBoxLayout;
+    password_row->setSpacing(6);
+    password_row->addWidget(password_edit, 1);
+    password_row->addWidget(show_button);
+    layout->addLayout(password_row);
+
+    auto* length_label = new QLabel(tr("Length"), this);
+    length_label->setObjectName(QStringLiteral("muted"));
 
     length_spin = new QSpinBox(this);
     length_spin->setRange(static_cast<int>(MIN_PASSWORD_LENGTH), static_cast<int>(MAX_PASSWORD_LENGTH));
     length_spin->setValue(static_cast<int>(DEFAULT_PASSWORD_LENGTH));
     length_spin->setToolTip(tr("Length of the generated password"));
+    // No arrow buttons: type the number, or use the mouse wheel / arrow keys.
+    length_spin->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    length_spin->setAlignment(Qt::AlignCenter);
+    length_spin->setFixedWidth(64);
 
     auto* generate_button = new QPushButton(tr("Generate"), this);
+    generate_button->setCursor(Qt::PointingHandCursor);
 
-    auto* password_row = new QHBoxLayout;
-    password_row->addWidget(password_edit, 1);
-    password_row->addWidget(show_button);
-    password_row->addWidget(length_spin);
-    password_row->addWidget(generate_button);
-    form->addRow(tr("Password:"), password_row);
+    auto* generator_row = new QHBoxLayout;
+    generator_row->setSpacing(8);
+    generator_row->addStretch();
+    generator_row->addWidget(length_label);
+    generator_row->addWidget(length_spin);
+    generator_row->addWidget(generate_button);
+    layout->addSpacing(4);
+    layout->addLayout(generator_row);
 
+    add_label(tr("WEBSITE"));
     url_edit = new QLineEdit(this);
     url_edit->setPlaceholderText(QStringLiteral("https://"));
-    form->addRow(tr("URL:"), url_edit);
+    layout->addWidget(url_edit);
 
+    add_label(tr("NOTES"));
     notes_edit = new QPlainTextEdit(this);
     notes_edit->setTabChangesFocus(true);
     notes_edit->setFixedHeight(90);
-    form->addRow(tr("Notes:"), notes_edit);
-
-    layout->addLayout(form);
+    layout->addWidget(notes_edit);
 
     error_label = new QLabel(this);
-    error_label->setStyleSheet(QStringLiteral("color: #c0392b;"));
+    error_label->setObjectName(QStringLiteral("error"));
+    error_label->setWordWrap(true);
     error_label->hide();
+    layout->addSpacing(4);
     layout->addWidget(error_label);
 
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
-    layout->addWidget(buttons);
+    auto* cancel_button = new QPushButton(tr("Cancel"), this);
+    auto* save_button = new QPushButton(tr("Save"), this);
+    save_button->setObjectName(QStringLiteral("primary"));
+    save_button->setDefault(true);
+
+    auto* buttons = new QHBoxLayout;
+    buttons->addStretch();
+    buttons->addWidget(cancel_button);
+    buttons->addWidget(save_button);
+    layout->addSpacing(12);
+    layout->addLayout(buttons);
 
     connect(show_button, &QToolButton::toggled, this, &EntryDialog::toggle_password_visibility);
     connect(show_button, &QToolButton::toggled, show_button,
             [show_button](bool visible) { show_button->setText(visible ? tr("Hide") : tr("Show")); });
     connect(generate_button, &QPushButton::clicked, this, &EntryDialog::generate_password);
-    connect(buttons, &QDialogButtonBox::accepted, this, &EntryDialog::validate_and_accept);
-    connect(buttons, &QDialogButtonBox::rejected, this, &EntryDialog::reject);
+    connect(save_button, &QPushButton::clicked, this, &EntryDialog::validate_and_accept);
+    connect(cancel_button, &QPushButton::clicked, this, &EntryDialog::reject);
 
     if (existing != nullptr) {
         original_name = existing->name;

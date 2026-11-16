@@ -29,8 +29,17 @@ if (BUILD_GUI)
             ../src/gui/main_window.cpp
             ../src/gui/entry_dialog.h
             ../src/gui/entry_dialog.cpp
+            ../src/gui/message_dialog.h
+            ../src/gui/message_dialog.cpp
+            ../src/gui/theme.h
+            ../src/gui/theme.cpp
     )
     target_link_libraries(gui_tests PRIVATE vault_core GTest::gtest Qt6::Widgets Qt6::Concurrent)
+    # The tests load the real style sheet too, so they run against the final look.
+    qt_add_resources(gui_tests "ui_resources"
+            PREFIX "/"
+            BASE ../resources
+            FILES ../resources/style.qss)
     gtest_discover_tests(gui_tests DISCOVERY_MODE PRE_TEST
             PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
